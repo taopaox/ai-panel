@@ -108,6 +108,7 @@ export function useWorkspace() {
   const managing = ref(false);
 
   const webviews = new Map<string, Webview>();
+  const openedLabels = ref(new Set<string>());
   const creating = new Set<string>();
   const unlisteners: Array<() => void> = [];
   const historyQuerySeq = new Map<string, number>();
@@ -127,6 +128,14 @@ export function useWorkspace() {
   const visibleServiceIds = computed(
     () => new Set(panes.value.map((pane) => pane.serviceId)),
   );
+
+  const openedServiceIds = computed(() => {
+    const ids = new Set<string>();
+    for (const label of openedLabels.value) {
+      ids.add(serviceIdFromWebviewLabel(label));
+    }
+    return ids;
+  });
 
   const unusedServices = computed(() =>
     services.value.filter((service) => !visibleServiceIds.value.has(service.id)),
@@ -384,6 +393,45 @@ export function useWorkspace() {
     await persistLayouts();
   }
 
+  function syncOpenedLabel(label: string, open: boolean): void {
+    if (openedLabels.value.has(label) === open) {
+      return;
+    }
+    const next = new Set(openedLabels.value);
+    if (open) {
+      next.add(label);
+    } else {
+      next.delete(label);
+    }
+    openedLabels.value = next;
+  }
+
+  function rememberWebview(label: string, webview: Webview): void {
+    webviews.set(label, webview);
+    syncOpenedLabel(label, true);
+  }
+
+  async function closeWebviews(labels: string[]): Promise<void> {
+    const unique = [...new Set(labels)];
+    const next = new Set(openedLabels.value);
+    const toClose: string[] = [];
+    for (const label of unique) {
+      if (webviews.has(label)) {
+        webviews.delete(label);
+        toClose.push(label);
+      }
+      next.delete(label);
+    }
+    openedLabels.value = next;
+    await Promise.all(
+      toClose.map((label) => invoke("close_content_webview", { label })),
+    );
+  }
+
+  async function closeWebview(label: string): Promise<void> {
+    await closeWebviews([label]);
+  }
+
   function guardLocked(): boolean {
     if (!panesLocked.value) {
       return false;
@@ -481,7 +529,7 @@ export function useWorkspace() {
     }
     if (creating.has(label)) {
       const created = await waitForWebview(label);
-      webviews.set(label, created);
+      rememberWebview(label, created);
       return created;
     }
 
@@ -502,7 +550,7 @@ export function useWorkspace() {
         height: bounds.height,
       });
       webview = await waitForWebview(label);
-      webviews.set(label, webview);
+      rememberWebview(label, webview);
       return webview;
     } finally {
       creating.delete(label);
@@ -751,11 +799,7 @@ export function useWorkspace() {
     const nextTabs = tabs.filter((item) => item.label !== label);
     setServiceTabs(serviceId, nextTabs);
 
-    const webview = webviews.get(label);
-    if (webview) {
-      webviews.delete(label);
-      await invoke("close_content_webview", { label });
-    }
+    await closeWebview(label);
 
     if (lastTabByService.value[serviceId] === label) {
       const fallback = nextTabs[nextTabs.length - 1] ?? nextTabs[0];
@@ -763,6 +807,56 @@ export function useWorkspace() {
         await selectTab(fallback.label);
       }
     }
+  }
+
+  async function closeServicePages(id: string): Promise<void> {
+    const paneIndex = panes.value.findIndex((pane) => pane.serviceId === id);
+    if (paneIndex >= 0 && panesLocked.value) {
+      errorMessage.value = "分屏已锁定，请先解锁再关闭当前显示的页面";
+      return;
+    }
+
+    const labels = [...webviews.keys()].filter(
+      (label) => serviceIdFromWebviewLabel(label) === id,
+    );
+    if (labels.length === 0) {
+      return;
+    }
+
+    errorMessage.value = "";
+    await closeWebviews(labels);
+
+    const service = services.value.find((item) => item.id === id);
+    if (service) {
+      setServiceTabs(id, [homeTab(service)]);
+    }
+    if (lastTabByService.value[id]) {
+      const nextLast = { ...lastTabByService.value };
+      delete nextLast[id];
+      lastTabByService.value = nextLast;
+    }
+    historyByLabel.value = Object.fromEntries(
+      Object.entries(historyByLabel.value).filter(
+        ([label]) => serviceIdFromWebviewLabel(label) !== id,
+      ),
+    );
+
+    if (paneIndex >= 0 && panes.value.length > 1) {
+      await closePane(paneIndex);
+      return;
+    }
+
+    if (paneIndex >= 0) {
+      const fallback = services.value.find(
+        (item) => item.id !== id && openedServiceIds.value.has(item.id),
+      );
+      if (fallback) {
+        await showServiceInPane(fallback.id, 0);
+        return;
+      }
+    }
+
+    await layoutAll();
   }
 
   async function leaveServicePane(id: string): Promise<void> {
@@ -895,14 +989,7 @@ export function useWorkspace() {
     }
 
     const tabs = tabsByService.value[id] ?? [];
-    await Promise.all(
-      tabs.map(async (tab) => {
-        if (webviews.has(tab.label)) {
-          webviews.delete(tab.label);
-          await invoke("close_content_webview", { label: tab.label });
-        }
-      }),
-    );
+    await closeWebviews(tabs.map((tab) => tab.label));
 
     const nextTabs = { ...tabsByService.value };
     delete nextTabs[id];
@@ -1205,6 +1292,7 @@ export function useWorkspace() {
     focusedPaneIndex,
     activeId,
     visibleServiceIds,
+    openedServiceIds,
     savedLayouts,
     layoutItems,
     activeLayoutId,
@@ -1221,6 +1309,7 @@ export function useWorkspace() {
     selectService,
     selectTab,
     closeTab,
+    closeServicePages,
     addService,
     updateService,
     enableService,

@@ -13,6 +13,7 @@ const {
   paneViews,
   activeId,
   visibleServiceIds,
+  openedServiceIds,
   layoutItems,
   panesLocked,
   errorMessage,
@@ -25,6 +26,7 @@ const {
   selectService,
   selectTab,
   closeTab,
+  closeServicePages,
   addService,
   updateService,
   enableService,
@@ -162,8 +164,53 @@ async function onSplitterPointerUp(event: PointerEvent): Promise<void> {
           "
           @click="handleSelect(service.id, $event)"
         >
+          <span class="sr-only">{{
+            openedServiceIds.has(service.id) ? "已打开" : "未打开"
+          }}</span>
+          <span
+            class="h-2 w-2 shrink-0 rounded-full"
+            :class="
+              openedServiceIds.has(service.id)
+                ? 'bg-open'
+                : 'border border-muted/50'
+            "
+            :title="
+              openedServiceIds.has(service.id)
+                ? '页面已打开，占用内存'
+                : '页面未打开'
+            "
+            aria-hidden="true"
+          />
           <ServiceIcon :service="service" :size="20" />
           <span class="flex-1 truncate text-sm">{{ service.name }}</span>
+          <button
+            v-if="openedServiceIds.has(service.id)"
+            type="button"
+            class="flex h-7 w-7 items-center justify-center rounded-md text-muted/55 hover:text-danger cursor-pointer"
+            :class="
+              panesLocked && visibleServiceIds.has(service.id)
+                ? 'opacity-40 cursor-not-allowed hover:text-muted'
+                : ''
+            "
+            :disabled="panesLocked && visibleServiceIds.has(service.id)"
+            :aria-label="`关闭 ${service.name} 页面`"
+            :title="
+              panesLocked && visibleServiceIds.has(service.id)
+                ? '分屏已锁定，请先解锁再关闭当前显示的页面'
+                : '关闭页面以释放内存'
+            "
+            @click.stop="closeServicePages(service.id)"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="8" cy="8" r="5.25" stroke="currentColor" stroke-width="1.5" />
+              <path
+                d="M5.75 5.75l4.5 4.5M10.25 5.75l-4.5 4.5"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
           <button
             v-if="canSplit && !visibleServiceIds.has(service.id)"
             type="button"

@@ -10,6 +10,7 @@ export default defineConfig({
       text: "#f5f5f7",
       muted: "#8e8e93",
       active: "#2c2c2e",
+      open: "#30d158",
       danger: "#ff453a",
     },
   },

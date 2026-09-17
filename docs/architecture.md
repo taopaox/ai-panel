@@ -31,7 +31,7 @@
 | `wv-{serviceId}` | 服务首页 | 所在分屏栏的内容区 |
 | `wv-{serviceId}-t-{suffix}` | 该服务额外标签页 | 同上 |
 
-分屏时同时 `show()` 各栏当前标签对应的 WebView，其余 `hide()`。未进入过的服务仍是首次点击（或分屏放入该栏）时才创建。已打开页保留内存状态。同一服务不能同时出现在两栏。
+分屏时同时 `show()` 各栏当前标签对应的 WebView，其余 `hide()`。未进入过的服务仍是首次点击（或分屏放入该栏）时才创建。已打开页保留内存状态，侧栏用绿点标出；可关闭以销毁 WebView 释放内存。同一服务不能同时出现在两栏。
 
 ```
 App.vue（侧栏 + 管理页 / 各分屏栏标签栏 + 分隔条）
@@ -77,11 +77,11 @@ App.vue（侧栏 + 管理页 / 各分屏栏标签栏 + 分隔条）
 | 路径 | 职责 |
 | --- | --- |
 | [`src/types.ts`](../src/types.ts) | 服务模型、内置目录 `CATALOG_SERVICES`、默认侧栏 ID、分屏常量、固定分屏 `SavedLayout`、id / 标签 label 与 URL 规范化 |
-| [`src/App.vue`](../src/App.vue) | 窗口壳：侧栏列表、固定分屏菜单、管理页入口、多栏标签栏与分隔条 |
+| [`src/App.vue`](../src/App.vue) | 窗口壳：侧栏列表、打开状态与关页、固定分屏菜单、管理页入口、多栏标签栏与分隔条 |
 | [`src/components/ServiceIcon.vue`](../src/components/ServiceIcon.vue) | 侧栏 / 管理网格的品牌图标或字头 |
 | [`src/components/ServiceManager.vue`](../src/components/ServiceManager.vue) | 启动台式管理页：搜索、目录网格、自定义添加 / 编辑 |
 | [`src/components/TabBar.vue`](../src/components/TabBar.vue) | 后退/前进/刷新、页面标签、锁定/分屏/关闭分屏 |
-| [`src/composables/useWorkspace.ts`](../src/composables/useWorkspace.ts) | 服务、分屏栏、固定分屏菜单、锁定、标签状态、创建/切换 WebView、窗口缩放 |
+| [`src/composables/useWorkspace.ts`](../src/composables/useWorkspace.ts) | 服务、分屏栏、固定分屏菜单、锁定、标签状态、创建/切换/关闭 WebView、窗口缩放 |
 | [`src/lib/icons.ts`](../src/lib/icons.ts) | `logo` id 到 `src/assets/icons` SVG 的映射 |
 | [`src/lib/layout.ts`](../src/lib/layout.ts) | 侧栏、标签栏、分屏栏 bounds 与分隔条比例 |
 | [`src/lib/persist.ts`](../src/lib/persist.ts) | store 读写与内置/自定义/分屏/固定菜单合并 |
