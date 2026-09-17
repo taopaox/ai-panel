@@ -19,3 +19,5 @@ pnpm tauri dev
 ```bash
 pnpm tauri build
 ```
+
+推送到 `master` 后，GitHub Actions 会打 `build-N` tag，并发布 Windows / macOS 安装包到 [Releases](https://github.com/taopaox/ai-panel/releases)。

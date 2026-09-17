@@ -21,6 +21,17 @@ pnpm tauri build    # 打包
 
 开发以 `pnpm tauri dev` 拉起的那一个进程为准。直接 `open` 调试二进制可能再起一个实例。
 
+## 2.1 GitHub Actions 发布
+
+推送到 `master`（或手动跑 `Release` workflow）会：
+
+1. 打 tag `build-{run 序号}` 并创建 GitHub Release
+2. 编译 macOS Apple Silicon、macOS Intel、Windows x64 安装包，上传到该 Release
+
+下载见仓库 [Releases](https://github.com/taopaox/ai-panel/releases)。macOS 包是 ad-hoc 签名、未公证；Windows 包未签名。仓库 Settings → Actions → Workflow permissions 需允许读写，否则无法创建 tag / Release。
+
+本地验收仍以 `pnpm tauri dev` 的 Mac 窗口为准。
+
 ## 3. 新增内置服务
 
 在 [`src/types.ts`](../src/types.ts) 的 `CATALOG_SERVICES` 增加一项，并把图标 SVG 放到 [`src/assets/icons/`](../src/assets/icons/)（`logo` 与文件名一致，不含扩展名）：
@@ -57,3 +68,4 @@ pnpm tauri build    # 打包
 - `window.open` / `target=_blank` 会在当前服务下新开标签。依赖真实系统弹窗、`window.close` 或 `window.opener` 回传的流程可能不完整。额外标签不写入 `workspace.json`，退出后只保留各服务首页与分屏各栏的首页。
 - 分屏最多 3 栏；同一服务不能同时出现在两栏。拖动分隔条依赖指针捕获，若系统把后续移动事件交给内容 WebView，松手后再拖一次即可。
 - 固定分屏最多 12 个。锁定只冻结该菜单里各栏对应哪个服务，不拦住离开：点其他服务进入该页面，再点分屏菜单回来。站点内对话、标签、前进后退仍可用。解锁后改各栏网页会写回当前这项分屏菜单。
+- CI 会打 Windows / macOS 安装包，但 Windows 体验仍不打磨；macOS 包无 Apple 公证，下载后系统可能提示未验证开发者。

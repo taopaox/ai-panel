@@ -86,9 +86,10 @@ App.vue（侧栏 + 管理页 / 各分屏栏标签栏 + 分隔条）
 | [`src/lib/layout.ts`](../src/lib/layout.ts) | 侧栏、标签栏、分屏栏 bounds 与分隔条比例 |
 | [`src/lib/persist.ts`](../src/lib/persist.ts) | store 读写与内置/自定义/分屏/固定菜单合并 |
 | [`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs) | 子 WebView 生命周期、UA、新窗口改为开标签、前进/后退/刷新 |
-| [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) | 窗口尺寸、Overlay 标题栏 |
+| [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) | 窗口尺寸、Overlay 标题栏、macOS ad-hoc 签名 |
 | [`src-tauri/Cargo.toml`](../src-tauri/Cargo.toml) | `unstable`、store 依赖 |
 | [`src-tauri/capabilities/default.json`](../src-tauri/capabilities/default.json) | 侧栏 IPC 白名单 |
+| [`.github/workflows/release.yml`](../.github/workflows/release.yml) | 推送 `master` 后打 `build-N` tag，编译 Windows / macOS 安装包并发布 Release |
 
 ## 7. 扩展点
 
