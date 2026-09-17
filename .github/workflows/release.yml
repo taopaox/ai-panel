@@ -62,7 +62,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: build-${{ github.run_number }}
-          releaseName: AI Workspace build ${{ github.run_number }}
+          releaseName: AiPanel build ${{ github.run_number }}
           releaseBody: |
             自动构建自 `${{ github.sha }}`
 

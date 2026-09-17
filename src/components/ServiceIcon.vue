@@ -10,7 +10,7 @@ const props = withDefaults(
     appearance?: "sidebar" | "tile";
   }>(),
   {
-    size: 20,
+    size: 32,
     appearance: "sidebar",
   },
 );
@@ -25,11 +25,7 @@ const isTile = computed(() => props.appearance === "tile");
 <template>
   <span
     class="flex shrink-0 items-center justify-center overflow-hidden select-none"
-    :class="
-      isTile
-        ? 'rounded-[14px] border border-white/10 bg-white/8'
-        : 'rounded-full bg-white/10'
-    "
+    :class="isTile ? 'rounded-[14px] bg-hover' : 'rounded-lg bg-hover'"
     :style="{ width: `${size}px`, height: `${size}px` }"
     aria-hidden="true"
   >
@@ -38,13 +34,12 @@ const isTile = computed(() => props.appearance === "tile");
       :src="src"
       alt=""
       class="object-contain"
-      :class="isTile ? 'w-[72%] h-[72%]' : 'w-[70%] h-[70%]'"
+      :class="isTile ? 'w-[72%] h-[72%]' : 'w-[82%] h-[82%]'"
       draggable="false"
     />
     <span
       v-else
-      class="font-medium leading-none"
-      :class="isTile ? 'text-lg text-text/80' : 'text-[10px] text-text/80'"
+      :class="isTile ? 'text-lg text-text/80' : 'text-sm text-text/80'"
     >
       {{ initial }}
     </span>

@@ -5,6 +5,7 @@
 | [需求文档](requirements.md) | 产品目标、用户、功能范围、交互与验收 |
 | [架构设计](architecture.md) | 技术选型、窗口/WebView 模型、数据、权限、文件职责 |
 | [开发指南](development.md) | 环境、命令、扩展方式、本地数据、已知限制 |
+| [风格稿](style-preview.html) | 壳子 UI 风格对比（浏览器打开即可，不接入 App） |
 
 Agent 规范见仓库根目录 [`AGENTS.md`](../AGENTS.md)，只写约束，不替代上述文档。
 

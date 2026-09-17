@@ -17,6 +17,7 @@ import {
   splitRatioAt,
   widthsToRatios,
 } from "../lib/layout";
+import { showPopup, type PopupPoint } from "../lib/menu";
 import {
   loadWorkspaceState,
   saveActiveLayoutId,
@@ -25,10 +26,14 @@ import {
   saveLayouts,
   savePanes,
   savePanesLocked,
+  saveServiceOrder,
   saveServices,
+  saveSidebarCollapsed,
+  saveZoomByService,
 } from "../lib/persist";
 import {
   catalogServiceById,
+  clampZoom,
   composeServices,
   createCustomServiceId,
   createLayoutId,
@@ -39,13 +44,20 @@ import {
   layoutNameFromIds,
   MAX_PANES,
   MAX_SAVED_LAYOUTS,
+  nextLayoutName,
+  sanitizeLayoutName,
   MAX_TABS_PER_SERVICE,
+  ZOOM_STEP,
+  TAB_BAR_HEIGHT,
   normalizeEnabledIds,
   normalizeSavedLayouts,
+  normalizeServiceOrder,
   normalizeServiceUrl,
   samePageUrl,
   sameServiceIds,
   serviceIdFromWebviewLabel,
+  SIDEBAR_WIDTH_EXPANDED,
+  SIDEBAR_WIDTH_RAIL,
   titleFromUrl,
   webviewLabel,
   type AiService,
@@ -54,9 +66,11 @@ import {
   type HistoryState,
   type NavAction,
   type OpenTabPayload,
+  type OverlayKind,
   type SavedLayout,
   type WorkspacePane,
 } from "../types";
+import { useToast } from "./useToast";
 
 const HISTORY_POLL_MS = 800;
 const HISTORY_REFRESH_DELAY_MS = 160;
@@ -102,10 +116,14 @@ export function useWorkspace() {
   const savedLayouts = ref<SavedLayout[]>([]);
   const activeLayoutId = ref("");
   const panesLocked = ref(false);
-  const errorMessage = ref("");
+  const overlay = ref<OverlayKind>("none");
+  const sidebarCollapsed = ref(false);
+  const serviceOrder = ref<string[]>([...DEFAULT_ENABLED_IDS]);
+  const zoomByService = ref<Record<string, number>>({});
+  const loadingByLabel = ref<Record<string, boolean>>({});
   const ready = ref(false);
   const resizing = ref(false);
-  const managing = ref(false);
+  const { toastMessage, showToast } = useToast();
 
   const webviews = new Map<string, Webview>();
   const openedLabels = ref(new Set<string>());
@@ -120,6 +138,15 @@ export function useWorkspace() {
     startX: number;
     startWidths: number[];
   } | null = null;
+
+  const managing = computed(() => overlay.value === "manage");
+  const settingsOpen = computed(() => overlay.value === "settings");
+  const sidebarWidth = computed(() =>
+    sidebarCollapsed.value ? SIDEBAR_WIDTH_RAIL : SIDEBAR_WIDTH_EXPANDED,
+  );
+  const focusedZoom = computed(
+    () => zoomByService.value[activeId.value] ?? 1,
+  );
 
   const activeId = computed(
     () => panes.value[focusedPaneIndex.value]?.serviceId ?? "",
@@ -171,7 +198,12 @@ export function useWorkspace() {
   );
 
   const paneRects = computed(() =>
-    paneBoundsList(windowSize.value.width, windowSize.value.height, paneRatios.value),
+    paneBoundsList(
+      windowSize.value.width,
+      windowSize.value.height,
+      paneRatios.value,
+      sidebarWidth.value,
+    ),
   );
 
   const paneViews = computed(() =>
@@ -186,6 +218,7 @@ export function useWorkspace() {
         tabs: tabsByService.value[pane.serviceId] ?? [],
         canGoBack: history.canGoBack,
         canGoForward: history.canGoForward,
+        loading: Boolean(loadingByLabel.value[tabLabel]),
         focused: index === focusedPaneIndex.value,
         width: paneRects.value[index]?.width ?? 0,
       };
@@ -252,6 +285,12 @@ export function useWorkspace() {
       title: payload.title,
       url: payload.url,
     });
+    if (typeof payload.loading === "boolean") {
+      loadingByLabel.value = {
+        ...loadingByLabel.value,
+        [payload.label]: payload.loading,
+      };
+    }
   }
 
   async function refreshLabelHistory(label: string): Promise<void> {
@@ -299,14 +338,25 @@ export function useWorkspace() {
   function applyServiceLists(
     nextEnabled: string[],
     nextCustom: AiService[],
+    nextOrder = serviceOrder.value,
   ): void {
     enabledIds.value = normalizeEnabledIds(nextEnabled);
-    services.value = composeServices(enabledIds.value, nextCustom);
+    const composed = composeServices(enabledIds.value, nextCustom, nextOrder);
+    serviceOrder.value = normalizeServiceOrder(
+      nextOrder,
+      composed.map((service) => service.id),
+    );
+    services.value = composeServices(
+      enabledIds.value,
+      nextCustom,
+      serviceOrder.value,
+    );
   }
 
   async function persistServices(): Promise<void> {
     await saveServices(services.value);
     await saveEnabledServiceIds(enabledIds.value);
+    await saveServiceOrder(serviceOrder.value);
     const nextLayouts = pruneLayouts(savedLayouts.value);
     const layoutsChanged =
       nextLayouts.length !== savedLayouts.value.length ||
@@ -354,11 +404,13 @@ export function useWorkspace() {
         panesLocked.value = false;
         return;
       }
-      const rest = savedLayouts.value.filter((layout) => layout.id !== layoutId);
-      savedLayouts.value = pruneLayouts([
-        { ...current, ratios: [...paneRatios.value], locked: true },
-        ...rest,
-      ]);
+      savedLayouts.value = pruneLayouts(
+        savedLayouts.value.map((layout) =>
+          layout.id === layoutId
+            ? { ...current, ratios: [...paneRatios.value], locked: true }
+            : layout,
+        ),
+      );
       return;
     }
 
@@ -369,13 +421,21 @@ export function useWorkspace() {
 
     const updated: SavedLayout = {
       ...current,
-      name: layoutNameFromIds(serviceIds, services.value) || current.name,
+      name: nextLayoutName(
+        current.name,
+        current.serviceIds,
+        serviceIds,
+        services.value,
+      ),
       serviceIds,
       ratios: [...paneRatios.value],
       locked: false,
     };
-    const rest = savedLayouts.value.filter((layout) => layout.id !== layoutId);
-    savedLayouts.value = pruneLayouts([updated, ...rest]);
+    savedLayouts.value = pruneLayouts(
+      savedLayouts.value.map((layout) =>
+        layout.id === layoutId ? updated : layout,
+      ),
+    );
     if (!savedLayouts.value.some((layout) => layout.id === layoutId)) {
       activeLayoutId.value = "";
     }
@@ -436,7 +496,7 @@ export function useWorkspace() {
     if (!panesLocked.value) {
       return false;
     }
-    errorMessage.value = "分屏已锁定，请先解锁再改各栏网页";
+    showToast("分屏已锁定，请先解锁再改各栏网页");
     return true;
   }
 
@@ -463,7 +523,7 @@ export function useWorkspace() {
       await layoutShell();
     }
 
-    if (managing.value) {
+    if (overlay.value !== "none") {
       await Promise.all(
         [...webviews.values()].map(async (webview) => {
           await webview.hide();
@@ -476,6 +536,7 @@ export function useWorkspace() {
       windowSize.value.width,
       windowSize.value.height,
       paneRatios.value,
+      sidebarWidth.value,
     );
     const visible = new Map<string, (typeof rects)[number]>();
     panes.value.forEach((pane, index) => {
@@ -498,18 +559,25 @@ export function useWorkspace() {
     );
   }
 
-  async function setManaging(open: boolean): Promise<void> {
-    if (managing.value === open) {
+  async function setOverlay(next: OverlayKind): Promise<void> {
+    if (overlay.value === next) {
       return;
     }
-    managing.value = open;
-    if (open) {
-      errorMessage.value = "";
-    }
+    overlay.value = next;
     await layoutAll();
-    if (!open) {
+    if (next === "none") {
       await focusPane(focusedPaneIndex.value);
     }
+  }
+
+  async function setManaging(open: boolean): Promise<void> {
+    await setOverlay(open ? "manage" : "none");
+  }
+
+  async function toggleSidebar(): Promise<void> {
+    sidebarCollapsed.value = !sidebarCollapsed.value;
+    await saveSidebarCollapsed(sidebarCollapsed.value);
+    await layoutAll();
   }
 
   function scheduleLayout(measure = true): void {
@@ -530,6 +598,7 @@ export function useWorkspace() {
     if (creating.has(label)) {
       const created = await waitForWebview(label);
       rememberWebview(label, created);
+      await applyZoomToLabel(label);
       return created;
     }
 
@@ -540,7 +609,12 @@ export function useWorkspace() {
       const bounds =
         paneRects.value[paneIndex] ??
         paneRects.value[0] ??
-        paneBoundsList(windowSize.value.width, windowSize.value.height, [1])[0];
+        paneBoundsList(
+          windowSize.value.width,
+          windowSize.value.height,
+          [1],
+          sidebarWidth.value,
+        )[0];
       await invoke("create_content_webview", {
         label,
         url,
@@ -551,6 +625,7 @@ export function useWorkspace() {
       });
       webview = await waitForWebview(label);
       rememberWebview(label, webview);
+      await applyZoomToLabel(label);
       return webview;
     } finally {
       creating.delete(label);
@@ -597,7 +672,6 @@ export function useWorkspace() {
       return;
     }
 
-    errorMessage.value = "";
     const next = [...panes.value];
     next[paneIndex] = { ...pane, serviceId };
     panes.value = next;
@@ -615,8 +689,9 @@ export function useWorkspace() {
       await webviews.get(tab.label)?.setFocus();
       await refreshVisibleHistory();
     } catch (error) {
-      errorMessage.value =
-        error instanceof Error ? error.message : `打开 ${tab.title} 失败`;
+      showToast(
+        error instanceof Error ? error.message : `打开 ${tab.title} 失败`,
+      );
     }
   }
 
@@ -639,7 +714,6 @@ export function useWorkspace() {
   async function selectService(id: string): Promise<void> {
     const existing = panes.value.findIndex((pane) => pane.serviceId === id);
     if (existing >= 0) {
-      errorMessage.value = "";
       await focusPane(existing);
       return;
     }
@@ -650,23 +724,79 @@ export function useWorkspace() {
     await showServiceInPane(id, focusedPaneIndex.value);
   }
 
-  async function splitPane(fromIndex = focusedPaneIndex.value): Promise<void> {
+  function popupPointForPane(index: number): PopupPoint {
+    const rect = paneRects.value[index] ?? paneRects.value[focusedPaneIndex.value];
+    if (!rect) {
+      return { x: sidebarWidth.value + 48, y: TAB_BAR_HEIGHT / 2 };
+    }
+    return {
+      x: rect.x + Math.max(rect.width - 28, 16),
+      y: TAB_BAR_HEIGHT / 2,
+    };
+  }
+
+  async function splitPaneWith(
+    serviceId: string,
+    fromIndex = focusedPaneIndex.value,
+  ): Promise<void> {
     if (guardLocked()) {
       return;
     }
-    const source = unusedServices.value[0];
+    const source = services.value.find((item) => item.id === serviceId);
     if (!source || panes.value.length >= MAX_PANES) {
+      return;
+    }
+    if (visibleServiceIds.value.has(serviceId)) {
+      await focusPane(panes.value.findIndex((pane) => pane.serviceId === serviceId));
       return;
     }
 
     const insertAt = Math.min(fromIndex + 1, panes.value.length);
     const next = [...panes.value];
-    next.splice(insertAt, 0, { id: createPaneId(), serviceId: source.id });
+    next.splice(insertAt, 0, { id: createPaneId(), serviceId });
     panes.value = next;
     paneRatios.value = splitRatioAt(paneRatios.value, fromIndex);
     ensureHomeTab(source);
     await persistPanes();
-    await showServiceInPane(source.id, insertAt);
+    await showServiceInPane(serviceId, insertAt);
+  }
+
+  async function splitPane(
+    fromIndex = focusedPaneIndex.value,
+    point?: PopupPoint,
+  ): Promise<void> {
+    if (guardLocked()) {
+      return;
+    }
+    const unused = unusedServices.value;
+    if (panes.value.length >= MAX_PANES) {
+      showToast("最多 3 栏分屏");
+      return;
+    }
+    if (!unused[0]) {
+      showToast("没有可分屏的服务");
+      return;
+    }
+    if (unused.length === 1) {
+      await splitPaneWith(unused[0].id, fromIndex);
+      return;
+    }
+
+    try {
+      const picked = await showPopup(
+        unused.map((service) => ({
+          id: `popup:split:${service.id}`,
+          text: service.name,
+        })),
+        point ?? popupPointForPane(fromIndex),
+      );
+      if (!picked?.startsWith("popup:split:")) {
+        return;
+      }
+      await splitPaneWith(picked.slice("popup:split:".length), fromIndex);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "打开分屏菜单失败");
+    }
   }
 
   async function closePane(index: number): Promise<void> {
@@ -691,7 +821,6 @@ export function useWorkspace() {
   async function openInNewPane(serviceId: string): Promise<void> {
     const existing = panes.value.findIndex((pane) => pane.serviceId === serviceId);
     if (existing >= 0) {
-      errorMessage.value = "";
       await focusPane(existing);
       return;
     }
@@ -715,7 +844,11 @@ export function useWorkspace() {
   }
 
   function startPaneResize(splitterIndex: number, clientX: number): void {
-    const area = contentAreaSize(windowSize.value.width, windowSize.value.height);
+    const area = contentAreaSize(
+      windowSize.value.width,
+      windowSize.value.height,
+      sidebarWidth.value,
+    );
     resizeSession = {
       index: splitterIndex,
       startX: clientX,
@@ -812,7 +945,7 @@ export function useWorkspace() {
   async function closeServicePages(id: string): Promise<void> {
     const paneIndex = panes.value.findIndex((pane) => pane.serviceId === id);
     if (paneIndex >= 0 && panesLocked.value) {
-      errorMessage.value = "分屏已锁定，请先解锁再关闭当前显示的页面";
+      showToast("分屏已锁定，请先解锁再关闭当前显示的页面");
       return;
     }
 
@@ -823,7 +956,6 @@ export function useWorkspace() {
       return;
     }
 
-    errorMessage.value = "";
     await closeWebviews(labels);
 
     const service = services.value.find((item) => item.id === id);
@@ -897,7 +1029,7 @@ export function useWorkspace() {
 
     applyServiceLists(enabledIds.value, [...customServices.value, service]);
     await persistServices();
-    managing.value = false;
+    overlay.value = "none";
     await layoutAll();
     await selectService(service.id);
   }
@@ -947,7 +1079,7 @@ export function useWorkspace() {
       applyServiceLists([...enabledIds.value, id], customServices.value);
       await persistServices();
     }
-    managing.value = false;
+    overlay.value = "none";
     await layoutAll();
     await selectService(id);
   }
@@ -958,11 +1090,11 @@ export function useWorkspace() {
       return;
     }
     if (services.value.length <= 1) {
-      errorMessage.value = "至少保留一个服务";
+      showToast("至少保留一个服务");
       return;
     }
     if (panesLocked.value && visibleServiceIds.value.has(id)) {
-      errorMessage.value = "分屏已锁定，请先解锁再改各栏网页";
+      showToast("分屏已锁定，请先解锁再改各栏网页");
       return;
     }
 
@@ -980,11 +1112,11 @@ export function useWorkspace() {
       return;
     }
     if (services.value.length <= 1) {
-      errorMessage.value = "至少保留一个服务";
+      showToast("至少保留一个服务");
       return;
     }
     if (panesLocked.value && visibleServiceIds.value.has(id)) {
-      errorMessage.value = "分屏已锁定，请先解锁再改各栏网页";
+      showToast("分屏已锁定，请先解锁再改各栏网页");
       return;
     }
 
@@ -1011,13 +1143,13 @@ export function useWorkspace() {
       return;
     }
 
-    errorMessage.value = "";
     try {
       await invoke("navigate_content_webview", { label, action });
       scheduleHistoryRefresh();
     } catch (error) {
-      errorMessage.value =
-        error instanceof Error ? error.message : "页面导航失败";
+      showToast(
+        error instanceof Error ? error.message : "页面导航失败",
+      );
     }
   }
 
@@ -1041,12 +1173,228 @@ export function useWorkspace() {
     await navigateTab(label, "reload");
   }
 
+  async function stopTab(label: string): Promise<void> {
+    await navigateTab(label, "stop");
+  }
+
+  async function applyZoomToLabel(label: string): Promise<void> {
+    const serviceId = serviceIdFromWebviewLabel(label);
+    const factor = zoomByService.value[serviceId] ?? 1;
+    try {
+      await invoke("set_content_zoom", { label, factor });
+    } catch {
+      // 页面尚未就绪时忽略
+    }
+  }
+
+  async function persistZoom(): Promise<void> {
+    await saveZoomByService(zoomByService.value);
+  }
+
+  async function applyZoomToService(serviceId: string): Promise<void> {
+    await Promise.all(
+      [...webviews.keys()]
+        .filter((label) => serviceIdFromWebviewLabel(label) === serviceId)
+        .map((label) => applyZoomToLabel(label)),
+    );
+  }
+
+  async function setServiceZoom(serviceId: string, value: number): Promise<void> {
+    const next = clampZoom(value);
+    const zoom = { ...zoomByService.value };
+    if (next === 1) {
+      delete zoom[serviceId];
+    } else {
+      zoom[serviceId] = next;
+    }
+    zoomByService.value = zoom;
+    await persistZoom();
+    await applyZoomToService(serviceId);
+    showToast(`${Math.round(next * 100)}%`);
+  }
+
+  async function zoomBy(delta: number): Promise<void> {
+    const id = activeId.value;
+    if (!id) {
+      return;
+    }
+    await setServiceZoom(id, (zoomByService.value[id] ?? 1) + delta);
+  }
+
+  async function zoomIn(): Promise<void> {
+    await zoomBy(ZOOM_STEP);
+  }
+
+  async function zoomOut(): Promise<void> {
+    await zoomBy(-ZOOM_STEP);
+  }
+
+  async function zoomReset(): Promise<void> {
+    const id = activeId.value;
+    if (!id) {
+      return;
+    }
+    await setServiceZoom(id, 1);
+  }
+
+  function focusedTab(): ContentTab | undefined {
+    const pane = paneViews.value[focusedPaneIndex.value];
+    return pane?.tabs.find((tab) => tab.label === pane.tabLabel);
+  }
+
+  function urlForService(id: string): string {
+    const pane = panes.value.find((item) => item.serviceId === id);
+    if (pane) {
+      const tabs = tabsByService.value[id] ?? [];
+      const label = lastTabByService.value[id] ?? webviewLabel(id);
+      const tab = tabs.find((item) => item.label === label);
+      if (tab?.url) {
+        return tab.url;
+      }
+    }
+    return services.value.find((service) => service.id === id)?.url ?? "";
+  }
+
+  async function copyUrl(url: string): Promise<void> {
+    if (!url) {
+      return;
+    }
+    const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
+    await writeText(url);
+    showToast("已复制链接");
+  }
+
+  async function openInBrowser(url: string): Promise<void> {
+    if (!url) {
+      return;
+    }
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+  }
+
+  async function copyActiveUrl(): Promise<void> {
+    await copyUrl(focusedTab()?.url ?? "");
+  }
+
+  async function openActiveInBrowser(): Promise<void> {
+    await openInBrowser(focusedTab()?.url ?? "");
+  }
+
+  async function closeActiveTab(): Promise<void> {
+    const tab = focusedTab();
+    if (!tab) {
+      return;
+    }
+    if (!tab.closable) {
+      showToast("首页标签不可关闭");
+      return;
+    }
+    await closeTab(tab.label);
+  }
+
+  async function reorderServices(fromId: string, toId: string): Promise<void> {
+    if (fromId === toId) {
+      return;
+    }
+    const ids = services.value.map((service) => service.id);
+    const from = ids.indexOf(fromId);
+    const to = ids.indexOf(toId);
+    if (from < 0 || to < 0) {
+      return;
+    }
+    ids.splice(from, 1);
+    ids.splice(to, 0, fromId);
+    applyServiceLists(enabledIds.value, customServices.value, ids);
+    await persistServices();
+  }
+
+  async function reorderLayouts(fromId: string, toId: string): Promise<void> {
+    if (fromId === toId) {
+      return;
+    }
+    const from = savedLayouts.value.findIndex((layout) => layout.id === fromId);
+    const to = savedLayouts.value.findIndex((layout) => layout.id === toId);
+    if (from < 0 || to < 0) {
+      return;
+    }
+    const next = [...savedLayouts.value];
+    const [item] = next.splice(from, 1);
+    if (!item) {
+      return;
+    }
+    next.splice(to, 0, item);
+    savedLayouts.value = next;
+    await persistLayouts();
+  }
+
+  async function handleMenuAction(id: string): Promise<void> {
+    if (id.startsWith("popup:")) {
+      return;
+    }
+    const label = paneViews.value[focusedPaneIndex.value]?.tabLabel ?? "";
+    switch (id) {
+      case "settings":
+        await setOverlay("settings");
+        return;
+      case "manage":
+        await setOverlay("manage");
+        return;
+      case "toggle-sidebar":
+        await toggleSidebar();
+        return;
+      case "split":
+        await splitPane();
+        return;
+      case "back":
+        await goBack(label);
+        return;
+      case "forward":
+        await goForward(label);
+        return;
+      case "reload":
+        await reloadTab(label);
+        return;
+      case "stop":
+        await stopTab(label);
+        return;
+      case "close-tab":
+        await closeActiveTab();
+        return;
+      case "zoom-in":
+        await zoomIn();
+        return;
+      case "zoom-out":
+        await zoomOut();
+        return;
+      case "zoom-reset":
+        await zoomReset();
+        return;
+      case "copy-url":
+        await copyActiveUrl();
+        return;
+      case "open-browser":
+        await openActiveInBrowser();
+        return;
+      default:
+        break;
+    }
+    if (id.startsWith("service-")) {
+      const index = Number(id.slice("service-".length)) - 1;
+      const service = services.value[index];
+      if (service) {
+        if (overlay.value !== "none") {
+          await setOverlay("none");
+        }
+        await selectService(service.id);
+      }
+    }
+  }
+
   async function setPanesLocked(locked: boolean): Promise<void> {
     if (panes.value.length < 2) {
       return;
     }
     panesLocked.value = locked;
-    errorMessage.value = "";
     if (locked && !activeLayoutId.value) {
       await saveCurrentLayout();
       if (!activeLayoutId.value) {
@@ -1068,13 +1416,12 @@ export function useWorkspace() {
     );
     if (existing) {
       activeLayoutId.value = existing.id;
-      errorMessage.value = "";
       await persistPanes();
       return;
     }
 
     if (savedLayouts.value.length >= MAX_SAVED_LAYOUTS) {
-      errorMessage.value = `最多固定 ${MAX_SAVED_LAYOUTS} 个分屏`;
+      showToast(`最多固定 ${MAX_SAVED_LAYOUTS} 个分屏`);
       return;
     }
 
@@ -1087,7 +1434,6 @@ export function useWorkspace() {
     };
     savedLayouts.value = [...savedLayouts.value, layout];
     activeLayoutId.value = layout.id;
-    errorMessage.value = "";
     await persistLayouts();
   }
 
@@ -1108,7 +1454,7 @@ export function useWorkspace() {
       }
     }
     if (unique.length < 2) {
-      errorMessage.value = "该分屏已失效，请删除后重新固定";
+      showToast("该分屏已失效，请删除后重新固定");
       return;
     }
 
@@ -1117,15 +1463,14 @@ export function useWorkspace() {
       sameServiceIds(currentPaneServiceIds(), unique) &&
       panesLocked.value === layout.locked
     ) {
-      errorMessage.value = "";
-      if (managing.value) {
-        await setManaging(false);
+      if (overlay.value !== "none") {
+        await setOverlay("none");
       }
       return;
     }
 
-    if (managing.value) {
-      managing.value = false;
+    if (overlay.value !== "none") {
+      overlay.value = "none";
     }
 
     const lastFocused = panes.value[focusedPaneIndex.value]?.serviceId ?? "";
@@ -1142,11 +1487,27 @@ export function useWorkspace() {
     focusedPaneIndex.value = unique.includes(lastFocused)
       ? unique.indexOf(lastFocused)
       : 0;
-    errorMessage.value = "";
     await persistPanes();
     await ensurePaneWebviews();
     await layoutAll();
     await focusPane(focusedPaneIndex.value);
+  }
+
+  async function renameLayout(id: string, raw: string): Promise<void> {
+    const current = savedLayouts.value.find((layout) => layout.id === id);
+    if (!current) {
+      return;
+    }
+    const fallback =
+      layoutNameFromIds(current.serviceIds, services.value) || current.name;
+    const name = sanitizeLayoutName(raw, fallback);
+    if (name === current.name) {
+      return;
+    }
+    savedLayouts.value = savedLayouts.value.map((layout) =>
+      layout.id === id ? { ...layout, name } : layout,
+    );
+    await persistLayouts();
   }
 
   async function removeLayout(id: string): Promise<void> {
@@ -1169,7 +1530,6 @@ export function useWorkspace() {
     if (activeLayoutId.value === id && panes.value.length >= 2) {
       panesLocked.value = locked;
     }
-    errorMessage.value = "";
     await persistLayouts();
   }
 
@@ -1210,6 +1570,9 @@ export function useWorkspace() {
       const state = await loadWorkspaceState();
       enabledIds.value = state.enabledServiceIds;
       services.value = state.services;
+      serviceOrder.value = state.serviceOrder;
+      sidebarCollapsed.value = state.sidebarCollapsed;
+      zoomByService.value = state.zoomByService;
       savedLayouts.value = state.savedLayouts;
       const hasSaved = state.services.some(
         (service) => service.id === state.lastActiveId,
@@ -1266,8 +1629,9 @@ export function useWorkspace() {
       await focusPane(focusedPaneIndex.value);
       ready.value = true;
     } catch (error) {
-      errorMessage.value =
-        error instanceof Error ? error.message : "工作区初始化失败";
+      showToast(
+        error instanceof Error ? error.message : "工作区初始化失败",
+      );
       ready.value = true;
     }
   });
@@ -1297,15 +1661,24 @@ export function useWorkspace() {
     layoutItems,
     activeLayoutId,
     panesLocked,
-    errorMessage,
+    toastMessage,
+    showToast,
     ready,
     resizing,
+    overlay,
     managing,
+    settingsOpen,
+    sidebarCollapsed,
+    sidebarWidth,
+    unusedServices,
     canSplit,
     canClosePane,
     canSaveLayout,
     currentLayoutSaved,
+    focusedZoom,
+    setOverlay,
     setManaging,
+    toggleSidebar,
     selectService,
     selectTab,
     closeTab,
@@ -1318,6 +1691,20 @@ export function useWorkspace() {
     goBack,
     goForward,
     reloadTab,
+    stopTab,
+    zoomIn,
+    zoomOut,
+    zoomReset,
+    copyUrl,
+    openInBrowser,
+    copyActiveUrl,
+    openActiveInBrowser,
+    urlForService,
+    closeActiveTab,
+    reorderServices,
+    reorderLayouts,
+    handleMenuAction,
+    splitPaneWith,
     focusPane,
     splitPane,
     closePane,
@@ -1328,6 +1715,7 @@ export function useWorkspace() {
     setPanesLocked,
     saveCurrentLayout,
     applyLayout,
+    renameLayout,
     removeLayout,
     toggleLayoutLock,
   };

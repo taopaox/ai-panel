@@ -1,0 +1,43 @@
+<svg width="240" height="64" viewBox="0 0 240 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- AI 极光星芒渐变 -->
+    <linearGradient id="wmSparkGrad" x1="26" y1="20" x2="48" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="0.5" stop-color="#818CF8"/>
+      <stop offset="1" stop-color="#C084FC"/>
+    </linearGradient>
+
+    <!-- 文字 Ai 专属渐变 -->
+    <linearGradient id="wmAiGrad" x1="76" y1="18" x2="110" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="0.6" stop-color="#818CF8"/>
+      <stop offset="1" stop-color="#C084FC"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 左侧微标 (Icon Mark) -->
+  <g transform="translate(4, 4)">
+    <!-- 背景 Squircle -->
+    <rect width="56" height="56" rx="14" fill="#1C1E24" stroke="rgba(255, 255, 255, 0.14)" stroke-width="1.2"/>
+    
+    <!-- 侧栏 -->
+    <rect x="8" y="11" width="7" height="34" rx="3.5" fill="#38BDF8" fill-opacity="0.3"/>
+    <circle cx="11.5" cy="16" r="1.5" fill="#38BDF8"/>
+    
+    <!-- 双分屏面板 -->
+    <rect x="18" y="11" width="15" height="34" rx="3.5" fill="white" fill-opacity="0.08" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+    <rect x="36" y="11" width="12" height="34" rx="3.5" fill="white" fill-opacity="0.08" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+    
+    <!-- 智慧星芒 -->
+    <path d="M34 18 C34 23.5 39 28 44 28 C39 28 34 32.5 34 38 C34 32.5 29 28 24 28 C29 28 34 23.5 34 18 Z" 
+          fill="url(#wmSparkGrad)"/>
+    <circle cx="34" cy="28" r="1.5" fill="#FFFFFF"/>
+  </g>
+
+  <!-- 右侧品牌文字 AiPanel -->
+  <g transform="translate(74, 10)">
+    <text x="0" y="32" font-family="'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif" font-size="24" font-weight="800" letter-spacing="0.5">
+      <tspan fill="url(#wmAiGrad)">Ai</tspan><tspan fill="#F4F4F6">Panel</tspan>
+    </text>
+  </g>
+</svg>

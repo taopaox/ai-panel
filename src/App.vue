@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import ServiceIcon from "./components/ServiceIcon.vue";
 import ServiceManager from "./components/ServiceManager.vue";
+import SettingsPage from "./components/SettingsPage.vue";
 import TabBar from "./components/TabBar.vue";
+import { usePointerReorder } from "./composables/usePointerReorder";
+import { useTheme } from "./composables/useTheme";
 import { useWorkspace } from "./composables/useWorkspace";
-import { SIDEBAR_WIDTH, SPLITTER_WIDTH } from "./types";
+import { onMenuAction, popupPointFromEvent, popupSeparator, showPopup, type PopupPoint } from "./lib/menu";
+import { MAX_LAYOUT_NAME, SPLITTER_WIDTH } from "./types";
 
 const {
   services,
@@ -16,13 +20,21 @@ const {
   openedServiceIds,
   layoutItems,
   panesLocked,
-  errorMessage,
+  toastMessage,
+  showToast,
+  overlay,
   managing,
+  settingsOpen,
+  sidebarCollapsed,
+  sidebarWidth,
   canSplit,
   canClosePane,
   canSaveLayout,
   currentLayoutSaved,
+  focusedZoom,
+  setOverlay,
   setManaging,
+  toggleSidebar,
   selectService,
   selectTab,
   closeTab,
@@ -35,8 +47,19 @@ const {
   goBack,
   goForward,
   reloadTab,
+  stopTab,
+  zoomIn,
+  zoomOut,
+  zoomReset,
+  copyUrl,
+  openInBrowser,
+  urlForService,
+  reorderServices,
+  reorderLayouts,
+  handleMenuAction,
   focusPane,
   splitPane,
+  splitPaneWith,
   closePane,
   openInNewPane,
   startPaneResize,
@@ -45,30 +68,41 @@ const {
   setPanesLocked,
   saveCurrentLayout,
   applyLayout,
+  renameLayout,
   removeLayout,
   toggleLayoutLock,
 } = useWorkspace();
 
-const headerTitle = computed(() => {
-  if (managing.value) {
-    return "管理服务";
-  }
-  const activeLayout = layoutItems.value.find((layout) => layout.active);
-  if (activeLayout) {
-    return activeLayout.name;
-  }
-  return paneViews.value
-    .map(
-      (pane) =>
-        services.value.find((service) => service.id === pane.serviceId)?.name,
-    )
-    .filter((name): name is string => Boolean(name))
-    .join(" · ");
+const { themeMode, setThemeMode } = useTheme();
+const {
+  dragId,
+  dropId,
+  dragging,
+  consumeClick,
+  begin: beginReorder,
+  move: moveReorder,
+  finish: finishReorder,
+} = usePointerReorder();
+const renamingId = ref("");
+const renameDraft = ref("");
+const renameInput = ref<HTMLInputElement | null>(null);
+let unlistenMenu: (() => void) | undefined;
+
+const version = "0.1.0";
+
+onMounted(async () => {
+  unlistenMenu = await onMenuAction((id) => {
+    void handleMenuAction(id);
+  });
+});
+
+onUnmounted(() => {
+  unlistenMenu?.();
 });
 
 async function handleSelect(id: string, event: MouseEvent): Promise<void> {
-  if (managing.value) {
-    await setManaging(false);
+  if (overlay.value !== "none") {
+    await setOverlay("none");
   }
   if (event.metaKey || event.ctrlKey) {
     await openInNewPane(id);
@@ -77,8 +111,16 @@ async function handleSelect(id: string, event: MouseEvent): Promise<void> {
   await selectService(id);
 }
 
-async function handleRemove(id: string): Promise<void> {
-  await removeService(id);
+async function confirmRemove(id: string): Promise<void> {
+  const { ask } = await import("@tauri-apps/plugin-dialog");
+  const service = services.value.find((item) => item.id === id);
+  const ok = await ask(`删除「${service?.name ?? "该服务"}」？`, {
+    kind: "warning",
+    title: "删除服务",
+  });
+  if (ok) {
+    await removeService(id);
+  }
 }
 
 async function handleAdd(
@@ -89,7 +131,7 @@ async function handleAdd(
   try {
     await addService(name, url, logoSrc);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "添加失败";
+    showToast(error instanceof Error ? error.message : "添加失败");
   }
 }
 
@@ -102,7 +144,7 @@ async function handleUpdate(
   try {
     await updateService(id, name, url, logoSrc);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "保存失败";
+    showToast(error instanceof Error ? error.message : "保存失败");
   }
 }
 
@@ -129,179 +171,421 @@ async function onSplitterPointerUp(event: PointerEvent): Promise<void> {
   }
   await endPaneResize();
 }
+
+async function onServiceClick(id: string, event: MouseEvent): Promise<void> {
+  if (consumeClick()) {
+    return;
+  }
+  await handleSelect(id, event);
+}
+
+function onLayoutClick(id: string): void {
+  if (consumeClick()) {
+    return;
+  }
+  if (renamingId.value === id) {
+    return;
+  }
+  void applyLayout(id);
+}
+
+async function commitReorder(kind: string, from: string, to: string): Promise<void> {
+  if (kind === "layout") {
+    await reorderLayouts(from, to);
+    return;
+  }
+  await reorderServices(from, to);
+}
+
+function onServicePointerDown(id: string, event: PointerEvent): void {
+  beginReorder("service", id, event);
+}
+
+function onLayoutPointerDown(id: string, event: PointerEvent): void {
+  if (renamingId.value === id) {
+    return;
+  }
+  beginReorder("layout", id, event);
+}
+
+function onServicePointerMove(event: PointerEvent): void {
+  moveReorder(event, "data-service-id");
+}
+
+function onLayoutPointerMove(event: PointerEvent): void {
+  moveReorder(event, "data-layout-id");
+}
+
+async function onReorderPointerUp(event: PointerEvent): Promise<void> {
+  await finishReorder(event, commitReorder);
+}
+
+function setRenameInput(el: unknown): void {
+  renameInput.value = el instanceof HTMLInputElement ? el : null;
+}
+
+async function startRename(id: string): Promise<void> {
+  if (rail.value) {
+    showToast("请先展开侧栏再改名称");
+    return;
+  }
+  const layout = layoutItems.value.find((item) => item.id === id);
+  if (!layout) {
+    return;
+  }
+  renamingId.value = id;
+  renameDraft.value = layout.name;
+  await nextTick();
+  renameInput.value?.focus();
+  renameInput.value?.select();
+}
+
+async function commitRename(): Promise<void> {
+  const id = renamingId.value;
+  if (!id) {
+    return;
+  }
+  const draft = renameDraft.value;
+  renamingId.value = "";
+  await renameLayout(id, draft);
+}
+
+function cancelRename(): void {
+  renamingId.value = "";
+}
+
+async function onLayoutContext(id: string, event: MouseEvent): Promise<void> {
+  event.preventDefault();
+  const layout = layoutItems.value.find((item) => item.id === id);
+  if (!layout) {
+    return;
+  }
+  const items = [
+    {
+      id: `popup:rename-layout:${id}`,
+      text: "重命名",
+      enabled: !rail.value,
+    },
+    {
+      id: `popup:lock-layout:${id}`,
+      text: layout.locked ? "解锁分屏" : "锁定分屏",
+    },
+    popupSeparator(),
+    { id: `popup:remove-layout:${id}`, text: "删除" },
+  ];
+  const picked = await showPopup(items, popupPointFromEvent(event));
+  if (picked === `popup:rename-layout:${id}`) {
+    await startRename(id);
+    return;
+  }
+  if (picked === `popup:lock-layout:${id}`) {
+    await toggleLayoutLock(id);
+    return;
+  }
+  if (picked === `popup:remove-layout:${id}`) {
+    await removeLayout(id);
+  }
+}
+
+async function onServiceContext(id: string, event: MouseEvent): Promise<void> {
+  event.preventDefault();
+  const service = services.value.find((item) => item.id === id);
+  if (!service) {
+    return;
+  }
+  const opened = openedServiceIds.value.has(id);
+  const visible = visibleServiceIds.value.has(id);
+  const items = [
+    {
+      id: `popup:split:${id}`,
+      text: "分屏打开",
+      enabled: canSplit.value && !visible,
+    },
+    {
+      id: `popup:close-pages:${id}`,
+      text: "关闭页面以释放内存",
+      enabled: opened && !(panesLocked.value && visible),
+    },
+    popupSeparator(),
+    { id: `popup:copy:${id}`, text: "复制链接" },
+    { id: `popup:browser:${id}`, text: "在浏览器中打开" },
+    popupSeparator(),
+  ];
+  if (service.builtin) {
+    items.push({
+      id: `popup:hide:${id}`,
+      text: "移出侧栏",
+      enabled: services.value.length > 1,
+    });
+  } else {
+    items.push({ id: `popup:edit:${id}`, text: "编辑" });
+    items.push({
+      id: `popup:remove:${id}`,
+      text: "删除",
+      enabled: services.value.length > 1,
+    });
+  }
+
+  const picked = await showPopup(items, popupPointFromEvent(event));
+  if (!picked) {
+    return;
+  }
+  if (picked === `popup:split:${id}`) {
+    await splitPaneWith(id);
+    return;
+  }
+  if (picked === `popup:close-pages:${id}`) {
+    await closeServicePages(id);
+    return;
+  }
+  if (picked === `popup:copy:${id}`) {
+    await copyUrl(urlForService(id));
+    return;
+  }
+  if (picked === `popup:browser:${id}`) {
+    await openInBrowser(urlForService(id));
+    return;
+  }
+  if (picked === `popup:hide:${id}`) {
+    await hideService(id);
+    return;
+  }
+  if (picked === `popup:edit:${id}`) {
+    await setOverlay("manage");
+    return;
+  }
+  if (picked === `popup:remove:${id}`) {
+    await confirmRemove(id);
+  }
+}
+
+async function onTabMore(paneIndex: number, point?: PopupPoint): Promise<void> {
+  const pane = paneViews.value[paneIndex];
+  if (!pane) {
+    return;
+  }
+  const tab = pane.tabs.find((item) => item.label === pane.tabLabel);
+  const percent = Math.round(focusedZoom.value * 100);
+  const items = [
+    { id: "popup:copy-url", text: "复制链接" },
+    { id: "popup:open-browser", text: "在浏览器中打开" },
+    popupSeparator(),
+    { id: "popup:zoom-in", text: "放大" },
+    { id: "popup:zoom-out", text: "缩小" },
+    { id: "popup:zoom-reset", text: `实际大小（${percent}%）` },
+    popupSeparator(),
+  ];
+  if (canClosePane.value) {
+    items.push({
+      id: "popup:toggle-lock",
+      text: panesLocked.value ? "解锁分屏" : "锁定分屏",
+    });
+  }
+  items.push({
+    id: "popup:close-service",
+    text: "关闭本服务页面",
+    enabled: !(panesLocked.value && visibleServiceIds.value.has(pane.serviceId)),
+  });
+
+  let picked: string | null = null;
+  try {
+    picked = await showPopup(items, point);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "打开菜单失败");
+    return;
+  }
+  if (!picked) {
+    return;
+  }
+  if (picked === "popup:copy-url" && tab?.url) {
+    await copyUrl(tab.url);
+    return;
+  }
+  if (picked === "popup:open-browser" && tab?.url) {
+    await openInBrowser(tab.url);
+    return;
+  }
+  if (picked === "popup:zoom-in") {
+    await zoomIn();
+    return;
+  }
+  if (picked === "popup:zoom-out") {
+    await zoomOut();
+    return;
+  }
+  if (picked === "popup:zoom-reset") {
+    await zoomReset();
+    return;
+  }
+  if (picked === "popup:toggle-lock") {
+    await setPanesLocked(!panesLocked.value);
+    return;
+  }
+  if (picked === "popup:close-service") {
+    await closeServicePages(pane.serviceId);
+  }
+}
+
+const rail = computed(() => sidebarCollapsed.value);
 </script>
 
 <template>
-  <div class="h-full w-full flex bg-sidebar text-text">
+  <div
+    class="relative h-full w-full flex bg-sidebar text-text"
+    :class="dragging ? 'cursor-grabbing' : ''"
+  >
     <aside
-      class="h-full shrink-0 flex flex-col select-none border-r border-line"
-      :style="{ width: `${SIDEBAR_WIDTH}px` }"
+      class="h-full shrink-0 flex flex-col select-none border-r border-line px-1"
+      :style="{ width: `${sidebarWidth}px` }"
     >
-      <header
-        class="pt-13 px-4 pb-3 border-b border-line"
+      <div
+        class="h-12 shrink-0"
         data-tauri-drag-region
-      >
-        <p class="text-xs tracking-wide text-muted" data-tauri-drag-region>
-          AI Workspace
-        </p>
-        <h1 class="mt-2 text-sm font-semibold truncate" data-tauri-drag-region>
-          {{ headerTitle || "选择服务" }}
-        </h1>
-      </header>
+      />
 
-      <nav class="flex-1 overflow-y-auto px-2 py-3" aria-label="AI 服务">
+      <nav class="flex-1 overflow-y-auto py-1" aria-label="AI 服务">
+        <p
+          v-if="!rail"
+          class="px-2 pt-1 pb-1 text-12px text-muted"
+        >
+          服务
+        </p>
         <button
-          v-for="service in services"
+          v-for="(service, index) in services"
           :key="service.id"
           type="button"
-          class="group w-full h-10 mb-1 px-2 rounded-lg flex items-center gap-3 text-left cursor-pointer transition-colors bg-transparent"
-          :class="
-            service.id === activeId && !managing
-              ? 'bg-active text-text'
-              : visibleServiceIds.has(service.id)
-                ? 'bg-white/5 text-text'
-                : 'text-text/85 hover:bg-white/5'
-          "
-          @click="handleSelect(service.id, $event)"
+          :data-service-id="service.id"
+          class="group relative w-full mb-0.5 rounded-lg flex items-center text-left cursor-pointer transition-colors"
+          :class="[
+            rail ? 'h-11 justify-center' : 'min-h-11 py-1 px-1 gap-2',
+            service.id === activeId && overlay === 'none'
+              ? 'is-current font-medium'
+              : 'hover:bg-hover',
+            dragId === service.id && dragging ? 'opacity-50' : '',
+            dropId === service.id && dragId !== service.id ? 'ring-1 ring-accent' : '',
+          ]"
+          :title="service.name"
+          :aria-current="service.id === activeId ? 'page' : undefined"
+          @click="onServiceClick(service.id, $event)"
+          @contextmenu="onServiceContext(service.id, $event)"
+          @pointerdown="onServicePointerDown(service.id, $event)"
+          @pointermove="onServicePointerMove"
+          @pointerup="onReorderPointerUp"
+          @pointercancel="onReorderPointerUp"
         >
-          <span class="sr-only">{{
-            openedServiceIds.has(service.id) ? "已打开" : "未打开"
-          }}</span>
-          <span
-            class="h-2 w-2 shrink-0 rounded-full"
-            :class="
-              openedServiceIds.has(service.id)
-                ? 'bg-open'
-                : 'border border-muted/50'
-            "
-            :title="
-              openedServiceIds.has(service.id)
-                ? '页面已打开，占用内存'
-                : '页面未打开'
-            "
-            aria-hidden="true"
-          />
-          <ServiceIcon :service="service" :size="20" />
-          <span class="flex-1 truncate text-sm">{{ service.name }}</span>
+          <span class="relative shrink-0">
+            <ServiceIcon :service="service" :size="32" />
+            <span
+              v-if="openedServiceIds.has(service.id)"
+              class="online-dot absolute -top-0.5 -right-0.5 size-3 rounded-full ring-2 ring-sidebar"
+              title="页面已打开"
+              aria-label="页面已打开"
+            />
+          </span>
+          <span v-if="!rail" class="flex-1 min-w-0 flex flex-col gap-0.5">
+            <span class="truncate text-14px leading-tight">{{ service.name }}</span>
+            <span class="text-11px text-muted leading-none">
+              {{ index < 9 ? `⌘${index + 1}` : "\u00a0" }}
+            </span>
+          </span>
           <button
-            v-if="openedServiceIds.has(service.id)"
+            v-if="!rail && openedServiceIds.has(service.id)"
             type="button"
-            class="flex h-7 w-7 items-center justify-center rounded-md text-muted/55 hover:text-danger cursor-pointer"
-            :class="
-              panesLocked && visibleServiceIds.has(service.id)
-                ? 'opacity-40 cursor-not-allowed hover:text-muted'
-                : ''
-            "
+            class="hidden group-hover:flex h-6 w-6 items-center justify-center rounded-md text-muted hover:text-danger cursor-pointer"
             :disabled="panesLocked && visibleServiceIds.has(service.id)"
             :aria-label="`关闭 ${service.name} 页面`"
-            :title="
-              panesLocked && visibleServiceIds.has(service.id)
-                ? '分屏已锁定，请先解锁再关闭当前显示的页面'
-                : '关闭页面以释放内存'
-            "
+            title="关闭页面以释放内存"
             @click.stop="closeServicePages(service.id)"
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <circle cx="8" cy="8" r="5.25" stroke="currentColor" stroke-width="1.5" />
-              <path
-                d="M5.75 5.75l4.5 4.5M10.25 5.75l-4.5 4.5"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-              />
-            </svg>
-          </button>
-          <button
-            v-if="canSplit && !visibleServiceIds.has(service.id)"
-            type="button"
-            class="hidden group-hover:flex h-7 w-7 items-center justify-center rounded-md text-muted hover:text-text cursor-pointer"
-            aria-label="分屏打开"
-            title="分屏打开"
-            @click.stop="openInNewPane(service.id)"
-          >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <rect x="2.5" y="3" width="11" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5" />
-              <path d="M8 3v10" stroke="currentColor" stroke-width="1.5" />
-            </svg>
-          </button>
-          <button
-            v-if="!service.builtin"
-            type="button"
-            class="hidden group-hover:flex h-7 w-7 items-center justify-center rounded-md text-muted hover:text-danger cursor-pointer"
-            aria-label="删除服务"
-            title="删除"
-            @click.stop="handleRemove(service.id)"
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path
-                d="M3 3l6 6M9 3L3 9"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-              />
-            </svg>
+            <span class="i-lucide-x text-14px" />
           </button>
         </button>
 
         <section
           v-if="canSaveLayout || layoutItems.length > 0"
-          class="mt-3 pt-3 border-t border-line"
+          class="mt-2 pt-2 border-t border-line"
           aria-label="固定分屏"
         >
-          <p class="px-2 mb-2 text-[11px] tracking-wide text-muted">分屏</p>
+          <p v-if="!rail" class="px-2 mb-1 text-12px text-muted">分屏</p>
           <button
             v-if="canSaveLayout && !currentLayoutSaved"
             type="button"
-            class="w-full h-9 mb-1 px-2 rounded-lg flex items-center gap-3 text-left text-sm text-muted hover:text-text hover:bg-white/5 cursor-pointer"
+            class="w-full rounded-md flex items-center text-left text-muted hover:text-text hover:bg-hover cursor-pointer"
+            :class="rail ? 'h-11 justify-center' : 'h-11 px-1 gap-2 text-14px'"
+            title="固定当前分屏"
             @click="saveCurrentLayout"
           >
-            <span
-              class="flex h-5 w-5 items-center justify-center rounded-full bg-white/10 text-text/80"
-              aria-hidden="true"
-            >
-              <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-                <path
-                  d="M6 2v8M2 6h8"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                />
-              </svg>
-            </span>
-            <span class="truncate">固定当前分屏</span>
+            <span class="i-lucide-plus text-16px" />
+            <span v-if="!rail" class="truncate">固定当前分屏</span>
           </button>
           <div
             v-for="layout in layoutItems"
             :key="layout.id"
             role="button"
             tabindex="0"
-            class="group w-full h-10 mb-1 px-2 rounded-lg flex items-center gap-3 text-left cursor-pointer transition-colors bg-transparent"
-            :class="
-              layout.active && !managing
-                ? 'bg-active text-text'
-                : 'text-text/85 hover:bg-white/5'
-            "
+            :data-layout-id="layout.id"
+            class="group w-full mb-px px-1 rounded-md flex items-center text-left cursor-pointer transition-colors"
+            :class="[
+              rail ? 'h-11 justify-center' : 'min-h-11 py-1 gap-2',
+              layout.active && overlay === 'none'
+                ? 'is-current font-medium'
+                : 'hover:bg-hover',
+              dragId === layout.id && dragging ? 'opacity-50' : '',
+              dropId === layout.id && dragId !== layout.id ? 'ring-1 ring-accent' : '',
+            ]"
             :title="layout.locked ? '已锁定：点其他服务可离开，再点此项回来' : layout.name"
-            @click="applyLayout(layout.id)"
-            @keydown.enter.prevent="applyLayout(layout.id)"
+            @click="onLayoutClick(layout.id)"
+            @dblclick.stop="startRename(layout.id)"
+            @contextmenu="onLayoutContext(layout.id, $event)"
+            @keydown.enter.prevent="onLayoutClick(layout.id)"
+            @pointerdown="onLayoutPointerDown(layout.id, $event)"
+            @pointermove="onLayoutPointerMove"
+            @pointerup="onReorderPointerUp"
+            @pointercancel="onReorderPointerUp"
           >
-            <span class="relative h-5 w-7 shrink-0" aria-hidden="true">
+            <span class="relative h-8 w-11 shrink-0" aria-hidden="true">
               <span
                 v-for="(service, index) in layout.services.slice(0, 3)"
                 :key="service.id"
                 class="absolute top-0"
                 :style="{
-                  left: `${index * 7}px`,
+                  left: `${index * 10}px`,
                   zIndex: index + 1,
                 }"
               >
-                <ServiceIcon :service="service" :size="20" />
+                <ServiceIcon :service="service" :size="28" />
               </span>
             </span>
-            <span class="flex-1 min-w-0 truncate text-sm">{{ layout.name }}</span>
+            <input
+              v-if="!rail && renamingId === layout.id"
+              :ref="setRenameInput"
+              v-model="renameDraft"
+              class="flex-1 min-w-0 h-8 px-1 rounded-md bg-bg text-14px outline-none ring-1 ring-accent"
+              :maxlength="MAX_LAYOUT_NAME"
+              aria-label="分屏名称"
+              @click.stop
+              @keydown.enter.prevent="commitRename"
+              @keydown.escape.prevent="cancelRename"
+              @blur="commitRename"
+            />
+            <span
+              v-else-if="!rail"
+              class="flex-1 min-w-0 truncate text-14px"
+            >{{ layout.name }}</span>
             <button
+              v-if="!rail && renamingId !== layout.id"
               type="button"
-              class="flex h-7 w-7 items-center justify-center rounded-md cursor-pointer"
+              class="hidden group-hover:flex h-6 w-6 items-center justify-center rounded-md text-muted hover:text-text cursor-pointer"
+              aria-label="重命名分屏"
+              title="重命名"
+              @click.stop="startRename(layout.id)"
+            >
+              <span class="i-lucide-pencil text-14px" />
+            </button>
+            <button
+              v-if="!rail"
+              type="button"
+              class="flex h-6 w-6 items-center justify-center rounded-md cursor-pointer"
               :class="
                 layout.locked
                   ? 'text-text'
@@ -311,70 +595,78 @@ async function onSplitterPointerUp(event: PointerEvent): Promise<void> {
               :title="layout.locked ? '解锁后可修改各栏网页' : '锁定后点其他服务可离开，再点此项回来'"
               @click.stop="toggleLayoutLock(layout.id)"
             >
-              <svg
-                v-if="layout.locked"
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-              >
-                <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.5" />
-                <path d="M5.5 7V5.2A2.5 2.5 0 0 1 10.5 5.2V7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-              </svg>
-              <svg
-                v-else
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-              >
-                <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.5" />
-                <path d="M5.5 7V5.2A2.5 2.5 0 0 1 8 2.7 2.5 2.5 0 0 1 10.5 5.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-              </svg>
+              <span
+                :class="layout.locked ? 'i-lucide-lock' : 'i-lucide-unlock'"
+                class="text-14px"
+              />
             </button>
             <button
+              v-if="!rail"
               type="button"
-              class="hidden group-hover:flex h-7 w-7 items-center justify-center rounded-md text-muted hover:text-danger cursor-pointer"
+              class="hidden group-hover:flex h-6 w-6 items-center justify-center rounded-md text-muted hover:text-danger cursor-pointer"
               aria-label="删除分屏"
               title="从侧栏移除"
               @click.stop="removeLayout(layout.id)"
             >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <path
-                  d="M3 3l6 6M9 3L3 9"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                />
-              </svg>
+              <span class="i-lucide-x text-14px" />
             </button>
           </div>
         </section>
       </nav>
 
-      <p v-if="errorMessage" class="px-4 pb-2 text-xs text-danger">
-        {{ errorMessage }}
-      </p>
-
-      <footer class="border-t border-line p-3">
+      <footer
+        class="border-t border-line py-1.5"
+        :class="rail ? 'flex flex-col items-center gap-1' : 'flex items-center gap-1 px-1'"
+      >
         <button
           type="button"
-          class="w-full h-9 rounded-md text-sm cursor-pointer"
-          :class="
-            managing
-              ? 'bg-active text-text'
-              : 'text-muted hover:text-text hover:bg-white/5'
-          "
+          class="h-9 rounded-md inline-flex items-center justify-center whitespace-nowrap text-muted hover:text-text hover:bg-hover cursor-pointer"
+          :class="[
+            rail ? 'w-9' : 'flex-1 min-w-0 text-14px',
+            managing ? 'bg-active text-text' : '',
+          ]"
+          :title="managing ? '返回网页' : '管理'"
           @click="setManaging(!managing)"
         >
-          {{ managing ? "返回网页" : "管理" }}
+          <span class="i-lucide-layout-grid text-18px" :class="rail ? '' : 'mr-1'" />
+          <span v-if="!rail" class="truncate">{{ managing ? "返回" : "管理" }}</span>
+        </button>
+        <button
+          type="button"
+          class="h-9 rounded-md inline-flex items-center justify-center whitespace-nowrap text-muted hover:text-text hover:bg-hover cursor-pointer"
+          :class="[
+            rail ? 'w-9' : 'flex-1 min-w-0 text-14px',
+            settingsOpen ? 'bg-active text-text' : '',
+          ]"
+          title="打开设置"
+          aria-label="打开设置"
+          @click="setOverlay(settingsOpen ? 'none' : 'settings')"
+        >
+          <span class="i-lucide-settings text-18px" :class="rail ? '' : 'mr-1'" />
+          <span v-if="!rail" class="truncate">设置</span>
+        </button>
+        <button
+          type="button"
+          class="h-9 w-9 shrink-0 rounded-md inline-flex items-center justify-center text-muted hover:text-text hover:bg-hover cursor-pointer"
+          :title="rail ? '展开侧栏' : '收起侧栏'"
+          :aria-label="rail ? '展开侧栏' : '收起侧栏'"
+          @click="toggleSidebar"
+        >
+          <span
+            class="text-18px"
+            :class="rail ? 'i-lucide-panel-left-open' : 'i-lucide-panel-left-close'"
+          />
         </button>
       </footer>
     </aside>
 
-    <section class="flex-1 min-w-0 h-full flex overflow-hidden">
+    <section class="relative flex-1 min-w-0 h-full flex overflow-hidden bg-bg">
+      <div
+        v-if="toastMessage"
+        class="absolute top-1 right-2 z-20 pointer-events-none h-8 px-3 rounded-md bg-text text-sidebar text-13px flex items-center"
+      >
+        {{ toastMessage }}
+      </div>
       <ServiceManager
         v-if="managing"
         :custom-services="customServices"
@@ -385,8 +677,18 @@ async function onSplitterPointerUp(event: PointerEvent): Promise<void> {
         @hide="hideService"
         @add="handleAdd"
         @update="handleUpdate"
-        @remove="handleRemove"
+        @remove="confirmRemove"
         @close="setManaging(false)"
+      />
+      <SettingsPage
+        v-else-if="settingsOpen"
+        :theme-mode="themeMode"
+        :sidebar-collapsed="sidebarCollapsed"
+        :version="version"
+        @theme="setThemeMode"
+        @toggle-sidebar="toggleSidebar"
+        @close="setOverlay('none')"
+        @open-github="openInBrowser('https://github.com/taopaox/ai-panel')"
       />
       <template v-else>
         <template v-for="(pane, index) in paneViews" :key="pane.id">
@@ -399,6 +701,7 @@ async function onSplitterPointerUp(event: PointerEvent): Promise<void> {
               :active-label="pane.tabLabel"
               :can-go-back="pane.canGoBack"
               :can-go-forward="pane.canGoForward"
+              :loading="pane.loading"
               :focused="pane.focused"
               :can-split="canSplit"
               :can-close-pane="canClosePane"
@@ -406,12 +709,14 @@ async function onSplitterPointerUp(event: PointerEvent): Promise<void> {
               @back="goBack(pane.tabLabel)"
               @forward="goForward(pane.tabLabel)"
               @reload="reloadTab(pane.tabLabel)"
+              @stop="stopTab(pane.tabLabel)"
               @select="selectTab"
               @close="closeTab"
               @focus="focusPane(pane.index, false)"
-              @split="splitPane(pane.index)"
+              @split="splitPane(pane.index, $event)"
               @close-pane="closePane(pane.index)"
               @toggle-lock="setPanesLocked(!panesLocked)"
+              @more="onTabMore(pane.index, $event)"
             />
             <div
               class="flex-1 pointer-events-none"
@@ -432,7 +737,7 @@ async function onSplitterPointerUp(event: PointerEvent): Promise<void> {
             @pointercancel="onSplitterPointerUp"
           >
             <div
-              class="w-px h-full bg-line group-hover:bg-white/35 group-active:bg-white/50"
+              class="w-px h-full bg-line group-hover:bg-muted group-active:bg-text"
             />
           </div>
         </template>

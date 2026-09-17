@@ -1,11 +1,19 @@
-export const SIDEBAR_WIDTH = 240;
-export const TAB_BAR_HEIGHT = 40;
+export const SIDEBAR_WIDTH_EXPANDED = 192;
+export const SIDEBAR_WIDTH_RAIL = 80;
+export const TAB_BAR_HEIGHT = 56;
 export const SPLITTER_WIDTH = 8;
 export const MAX_TABS_PER_SERVICE = 8;
 export const MAX_PANES = 3;
 export const MIN_PANE_WIDTH = 200;
 export const MAX_SAVED_LAYOUTS = 12;
+export const MAX_LAYOUT_NAME = 40;
 export const MAX_LOGO_BYTES = 200 * 1024;
+export const MIN_ZOOM = 0.5;
+export const MAX_ZOOM = 2;
+export const ZOOM_STEP = 0.1;
+
+export type ThemeMode = "light" | "dark" | "system";
+export type OverlayKind = "none" | "manage" | "settings";
 
 export interface AiService {
   id: string;
@@ -374,7 +382,7 @@ export const DEFAULT_SERVICES: AiService[] = DEFAULT_ENABLED_IDS.map((id) => {
   return service;
 });
 
-export type NavAction = "back" | "forward" | "reload";
+export type NavAction = "back" | "forward" | "reload" | "stop";
 
 export interface HistoryState {
   canGoBack: boolean;
@@ -385,6 +393,7 @@ export interface ContentPagePayload extends HistoryState {
   label: string;
   title: string;
   url: string;
+  loading?: boolean;
 }
 
 export interface OpenTabPayload {
@@ -461,6 +470,25 @@ export function layoutNameFromIds(
     .map((id) => services.find((service) => service.id === id)?.name)
     .filter((name): name is string => Boolean(name))
     .join(" · ");
+}
+
+export function sanitizeLayoutName(raw: string, fallback: string): string {
+  const name = raw.replace(/\s+/g, " ").trim().slice(0, MAX_LAYOUT_NAME);
+  return name || fallback;
+}
+
+export function nextLayoutName(
+  currentName: string,
+  previousIds: string[],
+  nextIds: string[],
+  services: AiService[],
+): string {
+  const trimmed = currentName.trim();
+  const previousAuto = layoutNameFromIds(previousIds, services);
+  if (trimmed && trimmed !== previousAuto) {
+    return sanitizeLayoutName(trimmed, trimmed);
+  }
+  return layoutNameFromIds(nextIds, services) || trimmed;
 }
 
 export function sameServiceIds(left: string[], right: string[]): boolean {
@@ -574,13 +602,63 @@ export function normalizeEnabledIds(ids: string[]): string[] {
 export function composeServices(
   enabledIds: string[],
   customServices: AiService[],
+  order: string[] = [],
 ): AiService[] {
   const catalogItems = normalizeEnabledIds(enabledIds)
     .map((id) => catalogServiceById(id))
     .filter((service): service is AiService => Boolean(service));
   const custom = customServices.filter((service) => !service.builtin);
   const combined = [...catalogItems, ...custom];
-  return combined.length > 0 ? combined : [...DEFAULT_SERVICES];
+  const list = combined.length > 0 ? combined : [...DEFAULT_SERVICES];
+  if (order.length === 0) {
+    return list;
+  }
+
+  const byId = new Map(list.map((service) => [service.id, service]));
+  const result: AiService[] = [];
+  for (const id of order) {
+    const service = byId.get(id);
+    if (service) {
+      result.push(service);
+      byId.delete(id);
+    }
+  }
+  for (const service of list) {
+    if (byId.has(service.id)) {
+      result.push(service);
+    }
+  }
+  return result;
+}
+
+export function normalizeServiceOrder(
+  order: string[],
+  availableIds: Iterable<string>,
+): string[] {
+  const available = new Set(availableIds);
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const id of order) {
+    if (!available.has(id) || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    next.push(id);
+  }
+  for (const id of available) {
+    if (!seen.has(id)) {
+      next.push(id);
+    }
+  }
+  return next;
+}
+
+export function clampZoom(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+  const rounded = Math.round(value * 10) / 10;
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, rounded));
 }
 
 export function readLogoFile(file: File): Promise<string> {

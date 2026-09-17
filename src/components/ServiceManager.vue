@@ -157,36 +157,32 @@ function isVisible(app: AiService): boolean {
 
 <template>
   <div class="relative h-full min-h-0 flex-1 min-w-0 flex flex-col bg-sidebar text-text">
-    <header class="h-10 px-3 flex items-center gap-2 border-b border-line shrink-0">
+    <header class="h-11 px-3 flex items-center gap-2 border-b border-line shrink-0">
       <p class="text-sm font-medium shrink-0">管理服务</p>
       <div class="flex-1 min-w-0">
         <input
           v-model="search"
-          class="w-full max-w-sm h-7 mx-auto block px-3 rounded-md bg-active text-sm outline-none border border-transparent focus:border-white/20"
+          class="w-full max-w-sm h-8 mx-auto block px-3 rounded-md bg-hover text-sm outline-none"
           placeholder="搜索名称或网址"
         />
       </div>
       <button
         type="button"
-        class="h-7 w-7 rounded-md text-muted hover:text-text hover:bg-active cursor-pointer"
+        class="h-8 w-8 rounded-md inline-flex items-center justify-center text-muted hover:text-text hover:bg-hover cursor-pointer"
         aria-label="添加服务"
         title="添加服务"
         @click="openCreate"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" class="mx-auto" aria-hidden="true">
-          <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-        </svg>
+        <span class="i-lucide-plus text-16px mx-auto" />
       </button>
       <button
         type="button"
-        class="h-7 w-7 rounded-md text-muted hover:text-text hover:bg-active cursor-pointer"
+        class="h-8 w-8 rounded-md inline-flex items-center justify-center text-muted hover:text-text hover:bg-hover cursor-pointer"
         aria-label="关闭管理"
         title="关闭"
         @click="emit('close')"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" class="mx-auto" aria-hidden="true">
-          <path d="M4.5 4.5 11.5 11.5M11.5 4.5 4.5 11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-        </svg>
+        <span class="i-lucide-x text-16px mx-auto" />
       </button>
     </header>
 
@@ -211,51 +207,41 @@ function isVisible(app: AiService): boolean {
             class="relative size-[58px] rounded-[14px] flex items-center justify-center transition-colors duration-150"
             :class="
               app.id === activeId
-                ? 'bg-white/10'
-                : 'hover:bg-white/8'
+                ? 'bg-hover'
+                : 'hover:bg-hover'
             "
           >
             <ServiceIcon :service="app" appearance="tile" :size="56" />
             <span
               v-if="isVisible(app)"
-              class="absolute -right-[3px] -bottom-[3px] size-2 rounded-full bg-emerald-400 ring-2 ring-sidebar"
+            class="absolute -right-[3px] -bottom-[3px] size-2 rounded-full bg-open ring-2 ring-sidebar"
               aria-hidden="true"
             />
           </div>
           <p
-            class="mt-2 min-h-9 max-w-[92px] text-center text-[13px] leading-[18px] text-muted line-clamp-2"
+            class="mt-2 min-h-9 max-w-[92px] text-center text-14px leading-[20px] text-muted line-clamp-2"
           >
             {{ app.name }}
           </p>
           <button
             v-if="!app.builtin"
             type="button"
-            class="hidden group-hover:flex absolute top-0 right-1 h-6 w-6 items-center justify-center rounded-md text-muted hover:text-text bg-sidebar/80 cursor-pointer"
+            class="hidden group-hover:flex absolute top-0 right-1 h-6 w-6 items-center justify-center rounded-md text-muted hover:text-text bg-sidebar cursor-pointer"
             aria-label="编辑服务"
             title="编辑"
             @click.stop="openEdit(app)"
           >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M3.5 12.5 12.5 3.5M8.5 3.5h4v4"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
+            <span class="i-lucide-pencil text-14px" />
           </button>
           <button
             v-if="app.builtin ? enabledSet.has(app.id) : true"
             type="button"
-            class="hidden group-hover:flex absolute top-0 left-1 h-6 w-6 items-center justify-center rounded-md text-muted hover:text-danger bg-sidebar/80 cursor-pointer"
+            class="hidden group-hover:flex absolute top-0 left-1 h-6 w-6 items-center justify-center rounded-md text-muted hover:text-danger bg-sidebar cursor-pointer"
             :aria-label="app.builtin ? '移出侧栏' : '删除服务'"
             :title="app.builtin ? '移出侧栏' : '删除'"
             @click.stop="app.builtin ? emit('hide', app.id) : emit('remove', app.id)"
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path d="M3 3l6 6M9 3L3 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-            </svg>
+            <span class="i-lucide-x text-14px" />
           </button>
         </div>
 
@@ -265,20 +251,18 @@ function isVisible(app: AiService): boolean {
           @click="openCreate"
         >
           <span
-            class="size-[58px] rounded-[14px] border border-dashed border-white/20 flex items-center justify-center group-hover:bg-white/8 transition-colors duration-150"
+            class="size-[58px] rounded-[14px] border border-dashed border-line flex items-center justify-center group-hover:bg-hover transition-colors duration-150"
           >
-            <svg width="22" height="22" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-            </svg>
+            <span class="i-lucide-plus text-24px" />
           </span>
-          <span class="mt-2 min-h-9 text-center text-[13px] leading-[18px]">添加服务</span>
+          <span class="mt-2 min-h-9 text-center text-14px leading-[20px]">添加服务</span>
         </button>
       </div>
     </div>
 
     <div
       v-if="showForm"
-      class="absolute inset-0 z-10 flex items-center justify-center bg-black/45 px-4"
+      class="absolute inset-0 z-10 flex items-center justify-center bg-sidebar/80 px-4"
       @click.self="resetForm"
     >
       <form
@@ -297,7 +281,7 @@ function isVisible(app: AiService): boolean {
           </button>
           <button
             type="button"
-            class="h-8 px-3 rounded-md text-xs text-muted hover:text-text hover:bg-white/8 cursor-pointer"
+            class="h-8 px-3 rounded-md text-xs text-muted hover:text-text hover:bg-hover cursor-pointer"
             @click="fileInput?.click()"
           >
             上传图标
@@ -314,7 +298,7 @@ function isVisible(app: AiService): boolean {
           名称
           <input
             v-model="newName"
-            class="h-9 px-3 rounded-md bg-active text-sm text-text outline-none border border-transparent focus:border-white/20"
+            class="h-9 px-3 rounded-md bg-hover text-sm text-text outline-none border border-transparent focus:border-line"
             placeholder="例如 Perplexity"
             maxlength="32"
             required
@@ -324,7 +308,7 @@ function isVisible(app: AiService): boolean {
           网址
           <input
             v-model="newUrl"
-            class="h-9 px-3 rounded-md bg-active text-sm text-text outline-none border border-transparent focus:border-white/20"
+            class="h-9 px-3 rounded-md bg-hover text-sm text-text outline-none border border-transparent focus:border-line"
             placeholder="https://..."
             required
           />
@@ -333,14 +317,14 @@ function isVisible(app: AiService): boolean {
         <div class="flex gap-2">
           <button
             type="button"
-            class="flex-1 h-9 rounded-md text-sm text-muted hover:bg-white/5 cursor-pointer"
+            class="flex-1 h-9 rounded-md text-sm text-muted hover:bg-hover cursor-pointer"
             @click="resetForm"
           >
             取消
           </button>
           <button
             type="submit"
-            class="flex-1 h-9 rounded-md text-sm bg-white/10 hover:bg-white/15 cursor-pointer"
+            class="flex-1 h-9 rounded-md text-sm bg-active hover:bg-hover cursor-pointer"
           >
             保存
           </button>

@@ -20,6 +20,8 @@
 - 打开服务管理页时必须先隐藏全部内容 WebView，不要用弹层去盖网页。
 - User-Agent 用 Safari/WebKit，不要伪装 Chrome。
 - 不要读取 Edge / Safari Cookie。
+- 右键菜单、分屏选择器、标签「更多」必须用 Rust `popup_menu`，不要用 DOM 弹层去盖网页。
+- 壳子颜色只用 CSS 变量 `--c-*`（UnoCSS token），不要在组件里写死 hex。
 
 ## 命令
 

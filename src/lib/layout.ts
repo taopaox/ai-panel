@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Webview } from "@tauri-apps/api/webview";
 import {
   MIN_PANE_WIDTH,
-  SIDEBAR_WIDTH,
+  SIDEBAR_WIDTH_EXPANDED,
   SPLITTER_WIDTH,
   TAB_BAR_HEIGHT,
 } from "../types";
@@ -29,12 +29,16 @@ export async function getLogicalWindowSize(): Promise<{
   };
 }
 
-export function contentAreaSize(windowWidth: number, windowHeight: number): {
+export function contentAreaSize(
+  windowWidth: number,
+  windowHeight: number,
+  sidebarWidth: number,
+): {
   width: number;
   height: number;
 } {
   return {
-    width: Math.max(windowWidth - SIDEBAR_WIDTH, 320),
+    width: Math.max(windowWidth - sidebarWidth, 320),
     height: Math.max(windowHeight - TAB_BAR_HEIGHT, 200),
   };
 }
@@ -103,10 +107,11 @@ export function paneBoundsList(
   windowWidth: number,
   windowHeight: number,
   ratios: number[],
+  sidebarWidth: number,
 ): ContentBounds[] {
-  const area = contentAreaSize(windowWidth, windowHeight);
+  const area = contentAreaSize(windowWidth, windowHeight, sidebarWidth);
   const widths = paneWidths(area.width, ratios);
-  let x = SIDEBAR_WIDTH;
+  let x = sidebarWidth;
   return widths.map((width, index) => {
     const bounds: ContentBounds = {
       x,
@@ -143,9 +148,11 @@ export function widthsToRatios(widths: number[]): number[] {
   return normalizeRatios(widths);
 }
 
-export async function getContentBounds(): Promise<ContentBounds> {
+export async function getContentBounds(
+  sidebarWidth = SIDEBAR_WIDTH_EXPANDED,
+): Promise<ContentBounds> {
   const { width, height } = await getLogicalWindowSize();
-  return paneBoundsList(width, height, [1])[0];
+  return paneBoundsList(width, height, [1], sidebarWidth)[0];
 }
 
 export async function layoutShell(): Promise<void> {

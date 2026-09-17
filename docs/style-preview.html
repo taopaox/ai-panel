@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AiPanel 风格稿</title>
+<style>
+  :root {
+    --ctrl-bg: #efefed;
+    --ctrl-txt: #37352f;
+    --ctrl-mute: #787774;
+    --ctrl-line: #e3e2e0;
+    --ctrl-chip: #fff;
+    --ctrl-on: #2383e2;
+    --ctrl-on-txt: #fff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+    background: var(--ctrl-bg);
+    color: var(--ctrl-txt);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- 控制条 ---------- */
+  .bar {
+    padding: 10px 16px 12px;
+    border-bottom: 1px solid var(--ctrl-line);
+    background: #f7f7f5;
+  }
+  .bar h1 { margin: 0; font-size: 14px; font-weight: 600; }
+  .bar .hint { margin: 2px 0 8px; font-size: 12px; color: var(--ctrl-mute); }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+  .label { font-size: 11px; color: var(--ctrl-mute); width: 56px; flex-shrink: 0; }
+  button.chip, label.chip {
+    appearance: none; border: 1px solid var(--ctrl-line); background: var(--ctrl-chip);
+    color: var(--ctrl-txt); font: inherit; font-size: 12px; height: 26px; padding: 0 10px;
+    border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  button.chip.on, label.chip:has(input:checked) {
+    background: var(--ctrl-on); border-color: var(--ctrl-on); color: var(--ctrl-on-txt);
+  }
+  label.chip input { display: none; }
+  .stage {
+    padding: 16px;
+    overflow: auto;
+    display: grid;
+    place-items: start center;
+  }
+
+  /* ---------- 窗口骨架 ---------- */
+  .win {
+    width: min(1080px, 100%);
+    height: 680px;
+    display: flex;
+    overflow: hidden;
+    border-radius: 12px;
+    position: relative;
+    font-size: 13px;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.08);
+  }
+  .lights { position: absolute; left: 14px; top: 16px; display: flex; gap: 7px; z-index: 5; pointer-events: none; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .lights i:nth-child(1) { background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; }
+  .lights i:nth-child(3) { background: #28c840; }
+
+  aside {
+    width: var(--side-w, 180px);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 46px 6px 8px;
+  }
+  .win.rail aside { width: 64px; padding-left: 8px; padding-right: 8px; align-items: stretch; }
+  .sec {
+    font-size: 11px; color: var(--mute); padding: 8px 8px 4px;
+    letter-spacing: .02em;
+  }
+  .win.rail .sec, .win.rail .nm, .win.rail .kbd, .win.rail .dot { display: none; }
+  .win.rail .item { justify-content: center; padding: 0; height: 36px; }
+  .win.hide-sec .sec { display: none; }
+
+  .item {
+    display: flex; align-items: center; gap: 8px;
+    height: var(--row-h, 28px);
+    padding: 0 8px; border-radius: var(--r, 6px);
+    margin-bottom: 1px; position: relative; cursor: default;
+  }
+  .item .ico {
+    width: var(--ico, 18px); height: var(--ico, 18px); border-radius: 5px;
+    display: grid; place-items: center; font-size: 9px; font-weight: 700; color: #fff; flex-shrink: 0;
+  }
+  .item .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+  .item .kbd { font-size: 10px; opacity: .42; font-family: ui-monospace, Menlo, monospace; }
+  .item.dim { opacity: .52; }
+  .win.hide-dot .dot { display: none; }
+  .win.hide-kbd .kbd { display: none; }
+  .win.compact { --row-h: 26px; --ico: 16px; font-size: 12.5px; }
+  .win.comfortable { --row-h: 32px; --ico: 20px; }
+
+  .stack { display: flex; }
+  .stack .ico { width: 14px; height: 14px; border-radius: 4px; font-size: 0; }
+  .stack .ico + .ico { margin-left: -4px; }
+
+  aside footer {
+    margin-top: auto; display: flex; gap: 2px; padding: 6px 4px 2px;
+  }
+  aside footer button {
+    flex: 1; height: 28px; border: 0; border-radius: 6px; background: transparent;
+    color: inherit; font: inherit; font-size: 12px; opacity: .72; cursor: pointer;
+  }
+  .win.rail aside footer { flex-direction: column; }
+  .win.rail aside footer button { flex: none; width: 100%; }
+
+  main { flex: 1; display: flex; min-width: 0; }
+  .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .split { width: 1px; flex-shrink: 0; background: var(--line); }
+  .tabbar {
+    height: 36px; display: flex; align-items: center; gap: 4px;
+    padding: 0 8px; flex-shrink: 0; border-bottom: 1px solid var(--line);
+  }
+  .btn {
+    width: 24px; height: 24px; border-radius: 5px; display: grid; place-items: center;
+    opacity: .55; font-size: 13px;
+  }
+  .btn.off { opacity: .22; }
+  .tabs { flex: 1; display: flex; gap: 3px; min-width: 0; }
+  .tab {
+    height: 24px; padding: 0 8px; border-radius: 5px; display: flex; align-items: center;
+    gap: 6px; font-size: 12px; white-space: nowrap; color: var(--mute);
+  }
+  .tab.on { color: var(--txt); background: var(--hover); }
+  .tab .fav { width: 8px; height: 8px; border-radius: 2px; }
+  .content { flex: 1; position: relative; overflow: hidden; background: var(--site); color: var(--site-txt, var(--txt)); }
+  .brand { position: absolute; top: 14px; left: 18px; font-size: 12px; font-weight: 600; opacity: .45; }
+  .chat {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-end; padding: 24px 28px; gap: 10px;
+  }
+  .msg {
+    width: 100%; max-width: 380px; border-radius: 10px; padding: 10px 12px;
+    font-size: 12px; line-height: 1.5; background: var(--bub);
+  }
+  .msg.me { align-self: flex-end; max-width: 220px; background: var(--me); color: var(--me-txt, #fff); }
+  .input {
+    width: 100%; max-width: 380px; height: 40px; border-radius: 20px;
+    display: flex; align-items: center; padding: 0 14px; font-size: 12px;
+    opacity: .85; border: 1px solid var(--line); background: var(--site);
+  }
+  .toast {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    font-size: 12px; padding: 6px 12px; border-radius: 6px; white-space: nowrap;
+    background: var(--txt); color: var(--bg);
+  }
+
+  .c-gpt { background: #10a37f; } .c-gem { background: #4285f4; } .c-cla { background: #d97757; }
+  .c-ds { background: #4d6bfe; } .c-grok { background: #333; } .c-kimi { background: #111; }
+
+  /* ========== 皮肤 ========== */
+  .s-now { --bg:#161618; --side:#161618; --line:#2c2c2e; --txt:#f5f5f7; --mute:#8e8e93; --sel:#2c2c2e; --hover:#2c2c2e; --acc:#30d158; --site:#161618; --bub:#2c2c2e; --me:#2c2c2e; --me-txt:#f5f5f7; }
+  .s-paper { --bg:#fbfbfa; --side:#f4f4f1; --line:#ecece8; --txt:#37352f; --mute:#9b9a97; --sel:#e8e8e4; --hover:#efefeb; --acc:#2383e2; --site:#fff; --bub:#f4f4f1; --me:#37352f; }
+  .s-paper-d { --bg:#191919; --side:#202020; --line:#2f2f2f; --txt:#d4d4d4; --mute:#9b9b9b; --sel:#333; --hover:#2c2c2c; --acc:#529cca; --site:#191919; --bub:#2c2c2c; --me:#d4d4d4; --me-txt:#191919; }
+  .s-finder { --bg:#f5f5f7; --side:#e8e8ed; --line:#d5d5d9; --txt:#1d1d1f; --mute:#6e6e73; --sel:rgba(10,132,255,.16); --hover:rgba(0,0,0,.05); --acc:#0a84ff; --site:#fff; --bub:#f1f1f3; --me:#0a84ff; }
+  .s-finder-d { --bg:#1e1e20; --side:#26262a; --line:#38383d; --txt:#f5f5f7; --mute:#98989d; --sel:rgba(10,132,255,.28); --hover:rgba(255,255,255,.06); --acc:#0a84ff; --site:#1c1c1e; --bub:#2c2c2e; --me:#0a84ff; }
+  .s-things { --bg:#f6f3ee; --side:#efeae2; --line:#e4ddd3; --txt:#3a3228; --mute:#8a7f72; --sel:#e4d7c5; --hover:#eae3d8; --acc:#d9730d; --site:#fbf8f3; --bub:#efeae2; --me:#3a3228; }
+  .s-bear { --bg:#fffdf8; --side:#f6f0e4; --line:#eadfcd; --txt:#2c2418; --mute:#8d7f68; --sel:#ead9b8; --hover:#f0e6d4; --acc:#c45c26; --site:#fffdf8; --bub:#f6f0e4; --me:#c45c26; }
+  .s-ia { --bg:#f2f1ed; --side:#e9e7e1; --line:#ddd9d0; --txt:#1a1916; --mute:#6f6b62; --sel:#ddd8cc; --hover:#e3dfd6; --acc:#1a1916; --site:#f7f6f2; --bub:#e9e7e1; --me:#1a1916; }
+  .s-craft { --bg:#f7f5ff; --side:#eeeafb; --line:#e0daf3; --txt:#2b2545; --mute:#7a7394; --sel:#ddd4f6; --hover:#e8e2fa; --acc:#6d5ae6; --site:#fff; --bub:#eeeafb; --me:#6d5ae6; }
+  .s-linear { --bg:#0f1011; --side:#141516; --line:#232427; --txt:#e6e6e6; --mute:#7c7f85; --sel:#24262b; --hover:#1c1d20; --acc:#5e6ad2; --site:#0f1011; --bub:#191a1d; --me:#5e6ad2; }
+  .s-geist { --bg:#000; --side:#0a0a0a; --line:#262626; --txt:#ededed; --mute:#888; --sel:#ededed; --hover:#171717; --acc:#50e3c2; --site:#000; --bub:#111; --me:#ededed; --me-txt:#000; }
+  .s-arc { --bg:#6f63ea; --side:transparent; --line:transparent; --txt:#fff; --mute:rgba(255,255,255,.75); --sel:rgba(255,255,255,.28); --hover:rgba(255,255,255,.12); --acc:#fff; --site:#fff; --site-txt:#1d1d1f; --bub:#f3f2f8; --me:#7d5cf3; }
+  .s-fluent { --bg:#f3f3f3; --side:#ebebeb; --line:#e3e3e3; --txt:#1b1b1b; --mute:#616161; --sel:#fff; --hover:rgba(0,0,0,.05); --acc:#0067c0; --site:#fff; --bub:#f3f3f3; --me:#0067c0; }
+  .s-slack { --bg:#fff; --side:#3f0e40; --line:#ead2ea; --txt:#1d1c1d; --mute:#616061; --sel:rgba(255,255,255,.16); --hover:rgba(255,255,255,.08); --acc:#2bac76; --site:#fff; --bub:#f4ede4; --me:#1264a3; }
+  .s-code { --bg:#1e1e1e; --side:#252526; --line:#2d2d2d; --txt:#cccccc; --mute:#858585; --sel:#37373d; --hover:#2a2d2e; --acc:#007acc; --site:#1e1e1e; --bub:#2d2d2d; --me:#0e639c; }
+
+  .win { background: var(--bg); color: var(--txt); }
+  aside { background: var(--side); border-right: 1px solid var(--line); }
+  .item.on { background: var(--sel); font-weight: 500; }
+  .s-geist .item.on { color: #000; }
+  .s-slack aside { color: #fff; }
+  .s-slack .sec { color: rgba(255,255,255,.55); }
+  .s-slack .item.dim { opacity: .7; }
+  .item .dot { background: var(--acc); }
+  .item .dot.empty { background: transparent; border: 1px solid var(--mute); }
+  .s-slack .item .dot.empty { border-color: rgba(255,255,255,.4); }
+  .tabbar { background: var(--bg); }
+  .s-arc main { padding: 8px 8px 8px 0; gap: 8px; }
+  .s-arc .pane { background: #fff; color: #1d1d1f; border-radius: 12px; overflow: hidden; }
+  .s-arc .split { width: 0; }
+  .s-arc .tabbar { background: #fff; border-bottom: 0; }
+  .s-arc .tab { background: #f0f0f4; border-radius: 999px; }
+  .s-arc .tab.on { background: #7d5cf3; color: #fff; }
+  .s-fluent main { padding: 8px 8px 8px 0; gap: 8px; }
+  .s-fluent .pane { background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .s-fluent .pane.on { border-color: var(--acc); }
+  .s-fluent .split { width: 0; }
+  .s-fluent .item.on::before {
+    content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px;
+    border-radius: 2px; background: var(--acc);
+  }
+  .s-code .pane.on .tabbar { box-shadow: inset 0 -1px 0 var(--acc); }
+  .s-linear .pane.on .tabbar { box-shadow: inset 0 -1px 0 var(--acc); }
+  .s-geist .tab.on { background: transparent; box-shadow: inset 0 -2px 0 #ededed; border-radius: 0; }
+
+  .note {
+    margin-top: 12px; font-size: 12px; color: var(--ctrl-mute); max-width: 1080px;
+  }
+</style>
+</head>
+<body>
+  <header class="bar">
+    <h1>AiPanel 风格稿</h1>
+    <p class="hint">用浏览器打开本文件即可对比。默认侧栏 180px（现在 App 是 240px）。改宽度 / 密度 / 是否显示圆点与快捷键，看哪种侧栏更干净。</p>
+    <div class="row">
+      <span class="label">风格</span>
+      <button class="chip on" data-skin="s-paper">Paper / Notion</button>
+      <button class="chip" data-skin="s-paper-d">Paper 深色</button>
+      <button class="chip" data-skin="s-finder">macOS</button>
+      <button class="chip" data-skin="s-finder-d">macOS 深色</button>
+      <button class="chip" data-skin="s-things">Things</button>
+      <button class="chip" data-skin="s-bear">Bear</button>
+      <button class="chip" data-skin="s-ia">iA Writer</button>
+      <button class="chip" data-skin="s-craft">Craft</button>
+      <button class="chip" data-skin="s-linear">Linear</button>
+      <button class="chip" data-skin="s-geist">Geist</button>
+      <button class="chip" data-skin="s-arc">Arc</button>
+      <button class="chip" data-skin="s-fluent">Fluent</button>
+      <button class="chip" data-skin="s-slack">Slack</button>
+      <button class="chip" data-skin="s-code">VS Code</button>
+      <button class="chip" data-skin="s-now">现在（对照）</button>
+    </div>
+    <div class="row">
+      <span class="label">侧栏宽</span>
+      <button class="chip" data-width="160">160</button>
+      <button class="chip on" data-width="180">180</button>
+      <button class="chip" data-width="200">200</button>
+      <button class="chip" data-width="220">220</button>
+      <button class="chip" data-width="240">240 现状</button>
+      <button class="chip" data-rail="1">图标栏 64</button>
+    </div>
+    <div class="row">
+      <span class="label">侧栏</span>
+      <button class="chip on" data-density="compact">紧凑行</button>
+      <button class="chip" data-density="">默认行</button>
+      <button class="chip" data-density="comfortable">宽松行</button>
+      <label class="chip"><input type="checkbox" id="hideDot" checked /> 去掉状态点</label>
+      <label class="chip"><input type="checkbox" id="hideKbd" checked /> 去掉 ⌘1</label>
+      <label class="chip"><input type="checkbox" id="hideSec" /> 去掉「服务/分屏」标题</label>
+    </div>
+  </header>
+
+  <div class="stage">
+    <div class="win s-paper compact hide-dot hide-kbd" id="win" style="--side-w:180px">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <aside>
+        <div class="sec">服务</div>
+        <div class="item on"><span class="dot"></span><span class="ico c-gpt">G</span><span class="nm">ChatGPT</span><span class="kbd">⌘1</span></div>
+        <div class="item"><span class="dot"></span><span class="ico c-cla">C</span><span class="nm">Claude</span><span class="kbd">⌘2</span></div>
+        <div class="item dim"><span class="dot empty"></span><span class="ico c-gem">G</span><span class="nm">Gemini</span><span class="kbd">⌘3</span></div>
+        <div class="item dim"><span class="dot empty"></span><span class="ico c-ds">D</span><span class="nm">DeepSeek</span><span class="kbd">⌘4</span></div>
+        <div class="item dim"><span class="dot empty"></span><span class="ico c-grok">X</span><span class="nm">Grok</span><span class="kbd">⌘5</span></div>
+        <div class="item dim"><span class="dot empty"></span><span class="ico c-kimi">K</span><span class="nm">Kimi</span><span class="kbd">⌘6</span></div>
+        <div class="sec">分屏</div>
+        <div class="item">
+          <span class="stack"><span class="ico c-gpt"></span><span class="ico c-cla"></span></span>
+          <span class="nm">ChatGPT · Claude</span>
+        </div>
+        <div class="item dim">
+          <span class="stack"><span class="ico c-gem"></span><span class="ico c-ds"></span><span class="ico c-grok"></span></span>
+          <span class="nm">Gemini · DeepSeek · Grok</span>
+        </div>
+        <footer>
+          <button type="button">管理</button>
+          <button type="button">设置</button>
+          <button type="button">⇤</button>
+        </footer>
+      </aside>
+      <main>
+        <div class="pane on">
+          <div class="tabbar">
+            <span class="btn">‹</span><span class="btn off">›</span><span class="btn">↻</span>
+            <div class="tabs">
+              <div class="tab on"><span class="fav c-gpt"></span>ChatGPT</div>
+              <div class="tab"><span class="fav c-gpt"></span>Sign in</div>
+            </div>
+            <span class="btn">⊟</span><span class="btn">⋯</span>
+          </div>
+          <div class="content">
+            <span class="brand">chatgpt.com</span>
+            <div class="chat">
+              <div class="msg me">侧栏能不能再窄一点？</div>
+              <div class="msg">可以。240px 对 5～8 个服务偏空；180px + 紧凑行 + 去掉圆点和快捷键提示，信息更干净。图标栏 64px 适合全屏看网页。</div>
+              <div class="input">发送消息…</div>
+            </div>
+          </div>
+        </div>
+        <div class="split"></div>
+        <div class="pane">
+          <div class="tabbar">
+            <span class="btn off">‹</span><span class="btn off">›</span><span class="btn">↻</span>
+            <div class="tabs"><div class="tab on"><span class="fav c-cla"></span>Claude</div></div>
+            <span class="btn">✕</span>
+          </div>
+          <div class="content">
+            <span class="brand">claude.ai</span>
+            <div class="chat">
+              <div class="msg me">布局怎么改？</div>
+              <div class="msg">顶部控制条可以直接改宽度和密度。选中的风格会记在本页，刷新还在。</div>
+              <div class="input">发送消息…</div>
+              <div class="toast">分屏已锁定</div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <p class="note" id="note">当前：Paper / Notion · 180px · 紧凑 · 无状态点 · 无快捷键提示</p>
+  </div>
+
+<script>
+  const win = document.getElementById("win");
+  const note = document.getElementById("note");
+  const skins = {
+    "s-now": "现在（对照）",
+    "s-paper": "Paper / Notion",
+    "s-paper-d": "Paper 深色",
+    "s-finder": "macOS",
+    "s-finder-d": "macOS 深色",
+    "s-things": "Things",
+    "s-bear": "Bear",
+    "s-ia": "iA Writer",
+    "s-craft": "Craft",
+    "s-linear": "Linear",
+    "s-geist": "Geist",
+    "s-arc": "Arc",
+    "s-fluent": "Fluent",
+    "s-slack": "Slack",
+    "s-code": "VS Code",
+  };
+  const state = {
+    skin: "s-paper",
+    width: "180",
+    rail: false,
+    density: "compact",
+    hideDot: true,
+    hideKbd: true,
+    hideSec: false,
+  };
+
+  function apply() {
+    const skinClasses = Object.keys(skins);
+    win.classList.remove(...skinClasses, "rail", "compact", "comfortable", "hide-dot", "hide-kbd", "hide-sec");
+    win.classList.add(state.skin);
+    if (state.rail) win.classList.add("rail");
+    if (state.density) win.classList.add(state.density);
+    if (state.hideDot) win.classList.add("hide-dot");
+    if (state.hideKbd) win.classList.add("hide-kbd");
+    if (state.hideSec) win.classList.add("hide-sec");
+    win.style.setProperty("--side-w", state.rail ? "64px" : `${state.width}px`);
+    const bits = [
+      skins[state.skin],
+      state.rail ? "图标栏 64px" : `${state.width}px`,
+      state.density === "compact" ? "紧凑" : state.density === "comfortable" ? "宽松" : "默认行高",
+      state.hideDot ? "无状态点" : "有状态点",
+      state.hideKbd ? "无快捷键提示" : "有 ⌘1",
+      state.hideSec ? "无分组标题" : null,
+    ].filter(Boolean);
+    note.textContent = "当前：" + bits.join(" · ");
+    localStorage.setItem("ai-panel-style-preview", JSON.stringify(state));
+  }
+
+  document.querySelectorAll("[data-skin]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-skin]").forEach((b) => b.classList.toggle("on", b === btn));
+      state.skin = btn.dataset.skin;
+      apply();
+    });
+  });
+  document.querySelectorAll("[data-width]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-width], [data-rail]").forEach((b) => b.classList.remove("on"));
+      btn.classList.add("on");
+      state.rail = false;
+      state.width = btn.dataset.width;
+      apply();
+    });
+  });
+  document.querySelector("[data-rail]").addEventListener("click", (e) => {
+    document.querySelectorAll("[data-width], [data-rail]").forEach((b) => b.classList.remove("on"));
+    e.currentTarget.classList.add("on");
+    state.rail = true;
+    apply();
+  });
+  document.querySelectorAll("[data-density]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-density]").forEach((b) => b.classList.toggle("on", b === btn));
+      state.density = btn.dataset.density;
+      apply();
+    });
+  });
+  document.getElementById("hideDot").addEventListener("change", (e) => { state.hideDot = e.target.checked; apply(); });
+  document.getElementById("hideKbd").addEventListener("change", (e) => { state.hideKbd = e.target.checked; apply(); });
+  document.getElementById("hideSec").addEventListener("change", (e) => { state.hideSec = e.target.checked; apply(); });
+
+  try {
+    const saved = JSON.parse(localStorage.getItem("ai-panel-style-preview") || "null");
+    if (saved) Object.assign(state, saved);
+  } catch {}
+  document.querySelectorAll("[data-skin]").forEach((b) => b.classList.toggle("on", b.dataset.skin === state.skin));
+  document.querySelectorAll("[data-width]").forEach((b) => b.classList.toggle("on", !state.rail && b.dataset.width === state.width));
+  document.querySelector("[data-rail]").classList.toggle("on", state.rail);
+  document.querySelectorAll("[data-density]").forEach((b) => b.classList.toggle("on", b.dataset.density === state.density));
+  document.getElementById("hideDot").checked = state.hideDot;
+  document.getElementById("hideKbd").checked = state.hideKbd;
+  document.getElementById("hideSec").checked = state.hideSec;
+  apply();
+</script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 背景渐变 -->
+    <linearGradient id="bgGrad" x1="40" y1="30" x2="470" y2="480" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22252E"/>
+      <stop offset="0.5" stop-color="#16181F"/>
+      <stop offset="1" stop-color="#0E0F13"/>
+    </linearGradient>
+
+    <!-- 巨型 Ai 极光字渐变 -->
+    <linearGradient id="aiBigGrad" x1="120" y1="120" x2="380" y2="300" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="0.35" stop-color="#60A5FA"/>
+      <stop offset="0.75" stop-color="#A855F7"/>
+      <stop offset="1" stop-color="#EC4899"/>
+    </linearGradient>
+
+    <!-- 面板文字质感白渐变 -->
+    <linearGradient id="panelTextGrad" x1="150" y1="340" x2="360" y2="440" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E2E8F0"/>
+    </linearGradient>
+
+    <!-- 星芒渐变 -->
+    <linearGradient id="starGrad" x1="290" y1="110" x2="360" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.35" stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#C084FC"/>
+    </linearGradient>
+
+    <radialGradient id="haloGlow" cx="325" cy="150" r="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#818CF8" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#818CF8" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="shadowFilter" x="0" y="0" width="512" height="512" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- 外壳 Squircle 容器 (macOS 比例) -->
+  <g filter="url(#shadowFilter)">
+    <rect x="28" y="28" width="456" height="456" rx="104" fill="url(#bgGrad)" stroke="rgba(255, 255, 255, 0.15)" stroke-width="2.5"/>
+    <rect x="30" y="30" width="452" height="452" rx="102" fill="none" stroke="rgba(0, 0, 0, 0.6)" stroke-width="1.5"/>
+  </g>
+
+  <!-- 背景极淡分屏网格线（保留工作台基因，不抢文字焦点） -->
+  <path d="M120 48 L120 464" stroke="rgba(255,255,255,0.04)" stroke-width="2"/>
+  <path d="M256 48 L256 464" stroke="rgba(255,255,255,0.04)" stroke-width="2" stroke-dasharray="8 8"/>
+  <path d="M392 48 L392 464" stroke="rgba(255,255,255,0.04)" stroke-width="2"/>
+  <path d="M48 316 L464 316" stroke="rgba(255,255,255,0.06)" stroke-width="1.5"/>
+
+  <!-- 星芒背景柔光晕 -->
+  <circle cx="325" cy="150" r="100" fill="url(#haloGlow)"/>
+
+  <!-- 主视觉文字 1: 巨大超粗体「Ai」 -->
+  <g>
+    <!-- 大写 A -->
+    <text x="210" y="275" text-anchor="end" 
+          font-family="'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Montserrat', sans-serif" 
+          font-size="200" font-weight="900" 
+          fill="url(#aiBigGrad)" 
+          style="letter-spacing: -6px;">A</text>
+    
+    <!-- 小写 i 的竖杠 -->
+    <rect x="248" y="165" width="46" height="110" rx="14" fill="url(#aiBigGrad)"/>
+
+    <!-- 小写 i 的圆点：升华为 AI 灵动星芒 -->
+    <circle cx="271" cy="120" r="28" fill="#38BDF8" fill-opacity="0.25"/>
+    <path d="M271 78 C271 104 290 120 316 120 C290 120 271 136 271 162 C271 136 252 120 226 120 C252 120 271 104 271 78 Z" 
+          fill="url(#starGrad)"/>
+    <circle cx="271" cy="120" r="4.5" fill="#FFFFFF"/>
+  </g>
+
+  <!-- 主视觉文字 2: 稳重大字「面板」 -->
+  <g transform="translate(256, 400)">
+    <!-- 精致毛玻璃托盘底衬 -->
+    <rect x="-140" y="-56" width="280" height="72" rx="36" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
+    <text x="0" y="-6" text-anchor="middle" 
+          font-family="'PingFang SC', 'Hiragino Sans GB', -apple-system, sans-serif" 
+          font-size="44" font-weight="800" letter-spacing="10" 
+          fill="url(#panelTextGrad)">
+      面板
+    </text>
+  </g>
+</svg>

@@ -1,5 +1,5 @@
 ---
-description: AI Workspace 改动规范。项目文档见 docs/。
+description: AiPanel 改动规范。项目文档见 docs/。
 alwaysApply: true
 ---
 
@@ -11,6 +11,8 @@ alwaysApply: true
 - Capabilities 只给 `"webviews": ["main"]`，不要给 `"windows": ["main"]`。
 - 用 Rust `add_child` 创建 `wv-*`；id 只用字母和 `-`。
 - 弹窗在当前内容 WebView 内跳转；UA 用 Safari，不要伪装 Chrome。
-- 打开服务管理页时必须先隐藏全部内容 WebView，不要用弹层去盖网页。
+- 打开服务管理页或设置页时必须先隐藏全部内容 WebView，不要用弹层去盖网页。
+- 右键 / 分屏选择器 / 标签更多菜单用 Rust `popup_menu`，不用 DOM 弹层。
+- 壳子颜色只用 `--c-*` token，不写死 hex。
 - 不要读 Edge Cookie。Vue 3 `<script setup lang="ts">` + UnoCSS + pnpm。
 - 验收用 `pnpm tauri dev`，不要用浏览器打开 Vite。
