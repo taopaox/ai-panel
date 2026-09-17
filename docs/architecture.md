@@ -27,17 +27,17 @@
 
 | WebView label | 内容 | 位置 |
 | --- | --- | --- |
-| `main` | Vue 壳：左侧栏 + 右侧顶部标签栏 | 铺满整个窗口 |
-| `wv-{serviceId}` | 服务首页 | `(240, 40)`，宽高为窗口剩余区域 |
+| `main` | Vue 壳：左侧栏 + 各栏标签栏 + 分隔条 | 铺满整个窗口 |
+| `wv-{serviceId}` | 服务首页 | 所在分屏栏的内容区 |
 | `wv-{serviceId}-t-{suffix}` | 该服务额外标签页 | 同上 |
 
-同一时刻只 `show()` 一个内容 WebView，其余 `hide()`。首次点击某服务才创建对应 WebView，避免启动时加载全部站点，并保留已打开页的内存状态。
+分屏时同时 `show()` 各栏当前标签对应的 WebView，其余 `hide()`。未进入过的服务仍是首次点击（或分屏放入该栏）时才创建。已打开页保留内存状态。同一服务不能同时出现在两栏。
 
 ```
-App.vue（侧栏 + 标签栏）
+App.vue（侧栏 + 管理页 / 各分屏栏标签栏 + 分隔条）
   └─ useWorkspace()
        ├─ persist.ts     → workspace.json
-       ├─ layout.ts      → 逻辑像素 bounds
+       ├─ layout.ts      → 各栏逻辑像素 bounds
        └─ invoke / 事件
             create_content_webview
             navigate_content_webview   # back | forward | reload
@@ -56,12 +56,12 @@ App.vue（侧栏 + 标签栏）
 
 | 类别 | 存储 | 写入方 |
 | --- | --- | --- |
-| 自定义服务列表、上次选中 ID | `~/Library/Application Support/com.yxhc.aipanel/workspace.json` | `tauri-plugin-store` |
+| 自定义服务列表、侧栏启用的内置 ID、上次选中 ID、分屏各栏服务与宽度比例、固定分屏菜单、锁定 | `~/Library/Application Support/com.yxhc.aipanel/workspace.json` | `tauri-plugin-store` |
 | Cookie、站点 localStorage | 系统 WebKit / HTTPStorages | WKWebView |
 
-启动时：内置服务始终来自 `src/types.ts` 的 `DEFAULT_SERVICES`；store 中只合并 `builtin: false` 的项。这样内置 URL 更新不会被旧缓存挡住。
+启动时：内置目录始终来自 `src/types.ts` 的 `CATALOG_SERVICES`；侧栏只显示 `enabledServiceIds` 中的内置项，再合并 store 里 `builtin: false` 的自定义项。这样内置 URL / 图标更新不会被旧缓存挡住。
 
-侧栏宽度常量 `SIDEBAR_WIDTH = 240`，标签栏高度 `TAB_BAR_HEIGHT = 40`。布局计算与 `main` WebView 实际尺寸都使用它们，不是仅靠 CSS 裁切。
+侧栏宽度 `SIDEBAR_WIDTH = 240`，标签栏高度 `TAB_BAR_HEIGHT = 40`，分屏分隔条 `SPLITTER_WIDTH = 8`，最多 `MAX_PANES = 3`，固定分屏最多 `MAX_SAVED_LAYOUTS = 12`。布局计算与 `main` WebView 实际尺寸都使用它们，不是仅靠 CSS 裁切。各栏宽度按比例分配内容区（扣除分隔条），最小约 200px。打开管理页时内容 WebView 全部 `hide()`，管理页由 `main` 铺满侧栏右侧。固定分屏 id 形如 `layout-abcdefgh`，只出现在侧栏，不创建 WebView。
 
 ## 5. 权限
 
@@ -76,12 +76,15 @@ App.vue（侧栏 + 标签栏）
 
 | 路径 | 职责 |
 | --- | --- |
-| [`src/types.ts`](../src/types.ts) | 服务模型、内置列表、id / 标签 label 与 URL 规范化 |
-| [`src/App.vue`](../src/App.vue) | 窗口壳：侧栏列表、添加表单、右侧标签栏 |
-| [`src/components/TabBar.vue`](../src/components/TabBar.vue) | 后退/前进/刷新与页面标签 |
-| [`src/composables/useWorkspace.ts`](../src/composables/useWorkspace.ts) | 服务与标签状态、创建/切换 WebView、窗口缩放 |
-| [`src/lib/layout.ts`](../src/lib/layout.ts) | 侧栏、标签栏与内容区逻辑像素 |
-| [`src/lib/persist.ts`](../src/lib/persist.ts) | store 读写与内置/自定义合并 |
+| [`src/types.ts`](../src/types.ts) | 服务模型、内置目录 `CATALOG_SERVICES`、默认侧栏 ID、分屏常量、固定分屏 `SavedLayout`、id / 标签 label 与 URL 规范化 |
+| [`src/App.vue`](../src/App.vue) | 窗口壳：侧栏列表、固定分屏菜单、管理页入口、多栏标签栏与分隔条 |
+| [`src/components/ServiceIcon.vue`](../src/components/ServiceIcon.vue) | 侧栏 / 管理网格的品牌图标或字头 |
+| [`src/components/ServiceManager.vue`](../src/components/ServiceManager.vue) | 启动台式管理页：搜索、目录网格、自定义添加 / 编辑 |
+| [`src/components/TabBar.vue`](../src/components/TabBar.vue) | 后退/前进/刷新、页面标签、锁定/分屏/关闭分屏 |
+| [`src/composables/useWorkspace.ts`](../src/composables/useWorkspace.ts) | 服务、分屏栏、固定分屏菜单、锁定、标签状态、创建/切换 WebView、窗口缩放 |
+| [`src/lib/icons.ts`](../src/lib/icons.ts) | `logo` id 到 `src/assets/icons` SVG 的映射 |
+| [`src/lib/layout.ts`](../src/lib/layout.ts) | 侧栏、标签栏、分屏栏 bounds 与分隔条比例 |
+| [`src/lib/persist.ts`](../src/lib/persist.ts) | store 读写与内置/自定义/分屏/固定菜单合并 |
 | [`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs) | 子 WebView 生命周期、UA、新窗口改为开标签、前进/后退/刷新 |
 | [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) | 窗口尺寸、Overlay 标题栏 |
 | [`src-tauri/Cargo.toml`](../src-tauri/Cargo.toml) | `unstable`、store 依赖 |
@@ -89,6 +92,6 @@ App.vue（侧栏 + 标签栏）
 
 ## 7. 扩展点
 
-- 新增内置 AI：改 `DEFAULT_SERVICES`。
-- 改侧栏宽度或标签栏高度：改 `SIDEBAR_WIDTH` / `TAB_BAR_HEIGHT`（布局会跟着变）。
+- 新增内置 AI：改 `CATALOG_SERVICES`，并把 SVG 放到 `src/assets/icons/`；若要默认出现在侧栏，加入 `DEFAULT_ENABLED_IDS`。
+- 改侧栏宽度、标签栏高度、分屏栏数或分隔条：改 `SIDEBAR_WIDTH` / `TAB_BAR_HEIGHT` / `MAX_PANES` / `SPLITTER_WIDTH`（布局会跟着变）。
 - 改新窗口策略：改 `lib.rs` 的 `on_new_window`。

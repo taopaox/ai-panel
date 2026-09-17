@@ -17,6 +17,7 @@
 - Capabilities 只授给 `"webviews": ["main"]`。禁止改成 `"windows": ["main"]`，否则第三方页面能调 IPC。
 - 子 WebView 用 Rust `window.add_child` 创建；label 为 `wv-{id}`，id 只用字母和 `-`。
 - 登录弹窗在当前内容 WebView 内跳转，不要新开 Mac 窗口。
+- 打开服务管理页时必须先隐藏全部内容 WebView，不要用弹层去盖网页。
 - User-Agent 用 Safari/WebKit，不要伪装 Chrome。
 - 不要读取 Edge / Safari Cookie。
 

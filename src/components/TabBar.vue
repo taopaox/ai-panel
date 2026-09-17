@@ -6,6 +6,10 @@ defineProps<{
   activeLabel: string;
   canGoBack: boolean;
   canGoForward: boolean;
+  focused: boolean;
+  canSplit: boolean;
+  canClosePane: boolean;
+  locked: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -14,6 +18,10 @@ const emit = defineEmits<{
   reload: [];
   select: [label: string];
   close: [label: string];
+  focus: [];
+  split: [];
+  closePane: [];
+  toggleLock: [];
 }>();
 
 const navButtonClass =
@@ -22,8 +30,10 @@ const navButtonClass =
 
 <template>
   <div
-    class="flex items-center gap-1 px-2 border-b border-line bg-sidebar select-none"
+    class="flex items-center gap-1 px-1.5 border-b bg-sidebar select-none"
+    :class="focused ? 'border-line' : 'border-line/80'"
     :style="{ height: `${TAB_BAR_HEIGHT}px` }"
+    @pointerdown="emit('focus')"
   >
     <div
       class="flex items-center shrink-0"
@@ -99,10 +109,12 @@ const navButtonClass =
       <div
         v-for="tab in tabs"
         :key="tab.label"
-        class="group relative max-w-44 min-w-28 h-8 px-3 rounded-t-md flex items-center gap-2 shrink-0 cursor-pointer"
+        class="group relative max-w-44 min-w-20 h-8 px-2.5 rounded-t-md flex items-center gap-2 shrink-0 cursor-pointer"
         :class="
           tab.label === activeLabel
-            ? 'bg-active text-text'
+            ? focused
+              ? 'bg-active text-text'
+              : 'bg-active/70 text-text/90'
             : 'text-muted hover:text-text hover:bg-white/5'
         "
         role="tab"
@@ -129,6 +141,77 @@ const navButtonClass =
           </svg>
         </button>
       </div>
+    </div>
+
+    <div class="flex items-center shrink-0">
+      <button
+        v-if="canClosePane"
+        type="button"
+        :class="navButtonClass"
+        :aria-label="locked ? '解锁分屏' : '锁定分屏'"
+        :title="locked ? '解锁后可修改各栏网页' : '锁定分屏：点其他服务可离开，再点分屏回来'"
+        :aria-pressed="locked"
+        @pointerdown.stop
+        @click.stop="emit('toggleLock')"
+      >
+        <svg
+          v-if="locked"
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+          class="mx-auto text-text"
+        >
+          <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.5" />
+          <path d="M5.5 7V5.2A2.5 2.5 0 0 1 10.5 5.2V7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        </svg>
+        <svg
+          v-else
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+          class="mx-auto"
+        >
+          <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.5" />
+          <path d="M5.5 7V5.2A2.5 2.5 0 0 1 8 2.7 2.5 2.5 0 0 1 10.5 5.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        :class="navButtonClass"
+        aria-label="向右分屏"
+        title="向右分屏"
+        :disabled="locked || !canSplit"
+        @pointerdown.stop
+        @click.stop="emit('split')"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" class="mx-auto">
+          <rect x="2.5" y="3" width="11" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5" />
+          <path d="M8 3v10" stroke="currentColor" stroke-width="1.5" />
+        </svg>
+      </button>
+      <button
+        v-if="canClosePane"
+        type="button"
+        :class="navButtonClass"
+        aria-label="关闭分屏"
+        title="关闭分屏"
+        :disabled="locked"
+        @pointerdown.stop
+        @click.stop="emit('closePane')"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" class="mx-auto">
+          <path
+            d="M4.5 4.5 11.5 11.5M11.5 4.5 4.5 11.5"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          />
+        </svg>
+      </button>
     </div>
   </div>
 </template>
