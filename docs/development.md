@@ -43,7 +43,7 @@ pnpm tauri build    # 打包
 
 ## 5. 验收
 
-按 [需求文档 §8](requirements.md#8-验收标准) 在桌面窗口中过一遍：切换、登录持久、自定义添加/删除、窗口缩放、始终单窗口。
+按 [需求文档 §8](requirements.md#8-验收标准) 在桌面窗口中过一遍：切换、登录持久、自定义添加/删除、窗口缩放、始终单窗口、标签栏、当前页后退/前进/刷新。
 
 ## 6. 已知限制
 
@@ -51,3 +51,5 @@ pnpm tauri build    # 打包
 - 隐藏中的 WebView 可能被系统节流，切回后一般恢复。
 - `create_content_webview` 必须是 async 命令（Windows 上同步创建会 deadlock；Mac 同样按此实现）。
 - Tauri 多 WebView 仍挂在 `unstable` feature 上。
+- 前进/后退可用性来自页面 History / Navigation API。站点若用自己的应用内栈，可能和侧栏按钮不一致；无 Navigation API 时前进按钮可能一直不可用。
+- `window.open` / `target=_blank` 会在当前服务下新开标签。依赖真实系统弹窗、`window.close` 或 `window.opener` 回传的流程可能不完整。额外标签不写入 `workspace.json`，退出后只保留各服务首页。
