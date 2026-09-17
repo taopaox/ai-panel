@@ -1,0 +1,15 @@
+---
+description: AI Workspace 改动规范。项目文档见 docs/。
+alwaysApply: true
+---
+
+# 规范
+
+文档：[需求](docs/requirements.md)、[架构](docs/architecture.md)、[开发](docs/development.md)。
+
+- 右侧必须是原生子 WebView，禁止 iframe。
+- Capabilities 只给 `"webviews": ["main"]`，不要给 `"windows": ["main"]`。
+- 用 Rust `add_child` 创建 `wv-*`；id 只用字母和 `-`。
+- 弹窗在当前内容 WebView 内跳转；UA 用 Safari，不要伪装 Chrome。
+- 不要读 Edge Cookie。Vue 3 `<script setup lang="ts">` + UnoCSS + pnpm。
+- 验收用 `pnpm tauri dev`，不要用浏览器打开 Vite。

@@ -1,0 +1,27 @@
+---
+description: 开发过程中必须同步更新 docs/ 与规范，禁止文档落后于代码。
+alwaysApply: true
+---
+
+# 文档随开发补齐
+
+实现或修改功能时，**同一轮必须更新文档**，不要等用户再提醒。代码合入即文档合入。
+
+## 改哪里
+
+| 发生了什么 | 更新 |
+| --- | --- |
+| 新功能、范围变化、验收项变化 | [`docs/requirements.md`](docs/requirements.md) |
+| WebView/文件/数据/权限/扩展点变化 | [`docs/architecture.md`](docs/architecture.md) |
+| 命令、数据路径、已知限制、怎么改代码 | [`docs/development.md`](docs/development.md) |
+| 新增一篇文档 | [`docs/README.md`](docs/README.md) 目录 |
+| 新的硬约束（禁止项、栈、IPC） | [`AGENTS.md`](AGENTS.md) 与本目录规则 |
+
+## 写法
+
+- 按现有文档体例写（需求/架构/开发），不要改回问答体。
+- 只补与本次改动相关的段落，保持简短、可执行。
+- 需求里的「已实现 / 非目标 / 验收」必须和代码一致；做过的标已实现，明确砍掉的放非目标。
+- 架构里的文件表、label、store 路径若变了，立刻改，禁止留过期路径。
+
+未改文档的功能改动视为未完成。
