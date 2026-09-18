@@ -34,10 +34,14 @@
     <circle cx="34" cy="28" r="1.5" fill="#FFFFFF"/>
   </g>
 
-  <!-- 右侧品牌文字 AiPanel -->
+  <!-- 右侧品牌文字「Ai面板」 -->
   <g transform="translate(74, 10)">
-    <text x="0" y="32" font-family="'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif" font-size="24" font-weight="800" letter-spacing="0.5">
-      <tspan fill="url(#wmAiGrad)">Ai</tspan><tspan fill="#F4F4F6">Panel</tspan>
+    <text x="0" y="27" font-family="'SF Pro Display', -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="24" font-weight="800" letter-spacing="0.5">
+      <tspan fill="url(#wmAiGrad)">Ai</tspan><tspan fill="#F4F4F6">面板</tspan>
     </text>
+    <text x="1" y="42" font-family="'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif" font-size="9" font-weight="600" letter-spacing="1.5" fill="#9CA3AF">
+      AI WORKSPACE
+    </text>
+    <circle cx="86" cy="39" r="2" fill="#34D399"/>
   </g>
 </svg>
