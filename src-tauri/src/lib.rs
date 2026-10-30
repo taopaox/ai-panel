@@ -1,3 +1,5 @@
+mod browser;
+
 use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
@@ -29,6 +31,7 @@ const PAGE_QUERY_JS: &str = r#"
   return {
     canGoBack,
     canGoForward,
+    focused: document.hasFocus(),
     title: document.title || "",
     url: location.href || ""
   };
@@ -71,6 +74,7 @@ impl PopupPick {
 struct PageState {
     can_go_back: bool,
     can_go_forward: bool,
+    focused: bool,
     title: String,
     url: String,
 }
@@ -81,6 +85,7 @@ struct ContentPagePayload {
     label: String,
     can_go_back: bool,
     can_go_forward: bool,
+    focused: bool,
     title: String,
     url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -92,6 +97,7 @@ struct ContentPagePayload {
 struct OpenTabPayload {
     opener_label: String,
     url: String,
+    navigate: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -131,6 +137,7 @@ fn emit_page_state(
             label: label.clone(),
             can_go_back: page.can_go_back,
             can_go_forward: page.can_go_forward,
+            focused: page.focused,
             title: page.title,
             url: page.url,
             loading,
@@ -191,6 +198,14 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         "在浏览器中打开",
         Some("CmdOrCtrl+Shift+O"),
     )?;
+    let restore_tab = item(app, "restore-tab", "恢复关闭的标签", Some("CmdOrCtrl+Shift+T"))?;
+    let next_tab = item(app, "next-tab", "下一个标签", Some("Ctrl+Tab"))?;
+    let previous_tab = item(app, "previous-tab", "上一个标签", Some("Ctrl+Shift+Tab"))?;
+    let find = item(app, "find", "查找页面内容…", Some("CmdOrCtrl+F"))?;
+    let find_next = item(app, "find-next", "下一个匹配", Some("CmdOrCtrl+G"))?;
+    let find_previous = item(app, "find-previous", "上一个匹配", Some("CmdOrCtrl+Shift+G"))?;
+    let address = item(app, "address", "查看页面地址", Some("CmdOrCtrl+L"))?;
+    let return_source = item(app, "return-source", "返回来源页面", None)?;
     let page_menu = SubmenuBuilder::new(app, "页面")
         .item(&back)
         .item(&forward)
@@ -198,6 +213,15 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tau
         .item(&stop)
         .separator()
         .item(&close_tab)
+        .item(&restore_tab)
+        .item(&next_tab)
+        .item(&previous_tab)
+        .item(&return_source)
+        .separator()
+        .item(&find)
+        .item(&find_next)
+        .item(&find_previous)
+        .item(&address)
         .separator()
         .item(&zoom_in)
         .item(&zoom_out)
@@ -295,7 +319,11 @@ async fn create_content_webview(
     let app_for_title = app.clone();
     let label_for_title = label.clone();
 
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
+    let mut builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed));
+    if !label.contains("-t-") {
+        builder = builder.initialization_script(browser::LINK_SCRIPT);
+    }
+    let builder = builder
         .user_agent(SAFARI_UA)
         .on_new_window(move |popup_url, _features| {
             if popup_url.scheme() == "http" || popup_url.scheme() == "https" {
@@ -305,6 +333,7 @@ async fn create_content_webview(
                     OpenTabPayload {
                         opener_label: label_for_popup.clone(),
                         url: popup_url.to_string(),
+                        navigate: browser::is_login_url(&popup_url),
                     },
                 );
             }
@@ -376,6 +405,35 @@ async fn content_webview_history(
     })
     .await
     .map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct FindResult {
+    total: usize,
+    index: usize,
+}
+
+#[tauri::command]
+async fn find_content_text(
+    caller: tauri::Webview,
+    app: tauri::AppHandle,
+    label: String,
+    query: String,
+    direction: i32,
+) -> Result<FindResult, String> {
+    if caller.label() != "main" || !label.starts_with("wv-") {
+        return Err("only the shell may search content pages".into());
+    }
+    let webview = app.get_webview(&label).ok_or("webview not found")?;
+    let args = serde_json::json!({"query": query, "direction": direction.signum()});
+    let script = format!("({})({})", include_str!("find.js"), args);
+    let (tx, rx) = std::sync::mpsc::channel();
+    webview.eval_with_callback(script, move |json| {
+        let _ = tx.send(serde_json::from_str::<FindResult>(&json).map_err(|err| err.to_string()));
+    }).map_err(|err| err.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        rx.recv_timeout(Duration::from_secs(3)).map_err(|_| "页面查找超时".to_string())?
+    }).await.map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -469,6 +527,7 @@ pub fn run() {
             content_webview_history,
             close_content_webview,
             set_content_zoom,
+            find_content_text,
             popup_menu
         ])
         .run(tauri::generate_context!())

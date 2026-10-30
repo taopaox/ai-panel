@@ -1,6 +1,6 @@
 export const SIDEBAR_WIDTH_EXPANDED = 192;
 export const SIDEBAR_WIDTH_RAIL = 80;
-export const TAB_BAR_HEIGHT = 56;
+export const TAB_BAR_HEIGHT = 96;
 export const SPLITTER_WIDTH = 8;
 export const MAX_TABS_PER_SERVICE = 8;
 export const MAX_PANES = 3;
@@ -394,11 +394,13 @@ export interface ContentPagePayload extends HistoryState {
   title: string;
   url: string;
   loading?: boolean;
+  focused?: boolean;
 }
 
 export interface OpenTabPayload {
   openerLabel: string;
   url: string;
+  navigate?: boolean;
 }
 
 export interface ContentTab {
@@ -406,6 +408,7 @@ export interface ContentTab {
   title: string;
   url: string;
   closable: boolean;
+  openerLabel?: string;
 }
 
 export interface WorkspacePane {

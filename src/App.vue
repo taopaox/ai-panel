@@ -32,6 +32,19 @@ const {
   canSaveLayout,
   currentLayoutSaved,
   focusedZoom,
+  findQuery,
+  findResult,
+  findError,
+  findFocusToken,
+  addressFocus,
+  openFind,
+  closeFind,
+  findText,
+  updateFindQuery,
+  returnToSource,
+  restoreClosedTab,
+  copyPageUrl,
+  openPageInBrowser,
   setOverlay,
   setManaging,
   toggleSidebar,
@@ -364,10 +377,15 @@ async function onTabMore(paneIndex: number, point?: PopupPoint): Promise<void> {
   if (!pane) {
     return;
   }
+  await focusPane(paneIndex, false);
   const tab = pane.tabs.find((item) => item.label === pane.tabLabel);
   const percent = Math.round(focusedZoom.value * 100);
   const items = [
-    { id: "popup:copy-url", text: "复制链接" },
+    { id: "popup:return-source", text: "返回来源页面", enabled: Boolean(tab?.closable) },
+    { id: "popup:find", text: "查找页面内容…（⌘F）" },
+    { id: "popup:restore", text: "恢复关闭的标签（⌘⇧T）" },
+    popupSeparator(),
+    { id: "popup:copy-url", text: "复制链接（⌘⇧C）" },
     { id: "popup:open-browser", text: "在浏览器中打开" },
     popupSeparator(),
     { id: "popup:zoom-in", text: "放大" },
@@ -398,13 +416,16 @@ async function onTabMore(paneIndex: number, point?: PopupPoint): Promise<void> {
     return;
   }
   if (picked === "popup:copy-url" && tab?.url) {
-    await copyUrl(tab.url);
+    await copyPageUrl(tab.label);
     return;
   }
   if (picked === "popup:open-browser" && tab?.url) {
-    await openInBrowser(tab.url);
+    await openPageInBrowser(tab.label);
     return;
   }
+  if (picked === "popup:return-source" && tab) { await returnToSource(tab.label); return; }
+  if (picked === "popup:find") { await openFind(); return; }
+  if (picked === "popup:restore") { await restoreClosedTab(); return; }
   if (picked === "popup:zoom-in") {
     await zoomIn();
     return;
@@ -423,6 +444,33 @@ async function onTabMore(paneIndex: number, point?: PopupPoint): Promise<void> {
   }
   if (picked === "popup:close-service") {
     await closeServicePages(pane.serviceId);
+  }
+}
+
+async function onTabContext(paneIndex: number, label: string, point: PopupPoint): Promise<void> {
+  const pane = paneViews.value[paneIndex];
+  if (!pane) return;
+  await focusPane(paneIndex, false);
+  const index = pane.tabs.findIndex(tab => tab.label === label);
+  const tab = pane.tabs[index];
+  if (!tab) return;
+  const picked = await showPopup([
+    { id: "popup:tab-close", text: "关闭标签", enabled: tab.closable },
+    { id: "popup:tab-others", text: "关闭其他浏览标签", enabled: pane.tabs.some(item => item.closable && item.label !== label) },
+    { id: "popup:tab-right", text: "关闭右侧标签", enabled: index < pane.tabs.length - 1 },
+    popupSeparator(),
+    { id: "popup:tab-source", text: "返回来源页面", enabled: tab.closable },
+    { id: "popup:tab-copy", text: "复制链接" },
+    { id: "popup:tab-browser", text: "在系统浏览器打开" },
+  ], point);
+  if (picked === "popup:tab-close") await closeTab(label);
+  if (picked === "popup:tab-source") await returnToSource(label);
+  if (picked === "popup:tab-copy") await copyPageUrl(label);
+  if (picked === "popup:tab-browser") await openPageInBrowser(label);
+  if (picked === "popup:tab-others" || picked === "popup:tab-right") {
+    const targets = pane.tabs.filter((item, i) => item.closable && (picked === "popup:tab-others" ? item.label !== label : i > index));
+    for (const item of targets) await closeTab(item.label);
+    await selectTab(label);
   }
 }
 
@@ -706,6 +754,21 @@ const rail = computed(() => sidebarCollapsed.value);
               :can-split="canSplit"
               :can-close-pane="canClosePane"
               :locked="panesLocked"
+              :zoom="pane.zoom"
+              :error="pane.error"
+              :find-open="pane.findOpen"
+              :find-query="findQuery"
+              :find-result="findResult"
+              :find-error="findError"
+              :find-focus-token="findFocusToken"
+              :address-focus-token="addressFocus.label === pane.tabLabel ? addressFocus.token : 0"
+              @source="returnToSource(pane.tabLabel)"
+              @browser="openPageInBrowser(pane.tabLabel)"
+              @copy="copyPageUrl(pane.tabLabel)"
+              @find-query="updateFindQuery"
+              @find="findText"
+              @close-find="closeFind()"
+              @context="(label, point) => onTabContext(pane.index, label, point)"
               @back="goBack(pane.tabLabel)"
               @forward="goForward(pane.tabLabel)"
               @reload="reloadTab(pane.tabLabel)"

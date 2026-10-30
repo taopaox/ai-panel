@@ -108,6 +108,7 @@ export function paneBoundsList(
   windowHeight: number,
   ratios: number[],
   sidebarWidth: number,
+  extraHeaderHeights: number[] = [],
 ): ContentBounds[] {
   const area = contentAreaSize(windowWidth, windowHeight, sidebarWidth);
   const widths = paneWidths(area.width, ratios);
@@ -115,9 +116,9 @@ export function paneBoundsList(
   return widths.map((width, index) => {
     const bounds: ContentBounds = {
       x,
-      y: TAB_BAR_HEIGHT,
+      y: TAB_BAR_HEIGHT + (extraHeaderHeights[index] ?? 0),
       width,
-      height: area.height,
+      height: Math.max(1, area.height - (extraHeaderHeights[index] ?? 0)),
     };
     x += width + (index < widths.length - 1 ? SPLITTER_WIDTH : 0);
     return bounds;

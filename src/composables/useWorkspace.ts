@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Webview } from "@tauri-apps/api/webview";
+import { getCurrentWebview, Webview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
@@ -121,6 +121,19 @@ export function useWorkspace() {
   const serviceOrder = ref<string[]>([...DEFAULT_ENABLED_IDS]);
   const zoomByService = ref<Record<string, number>>({});
   const loadingByLabel = ref<Record<string, boolean>>({});
+  const findLabel = ref("");
+  const findQuery = ref("");
+  const findResult = ref({ total: 0, index: 0 });
+  const findError = ref("");
+  const findFocusToken = ref(0);
+  const addressFocus = ref({ label: "", token: 0 });
+  const pageErrors = ref<Record<string, string>>({});
+  const closedTabs: Array<{ serviceId: string; tab: ContentTab; index: number }> = [];
+  const loadTimers = new Map<string, number>();
+  let findSeq = 0;
+  let findTimer = 0;
+  let menuQueue: Promise<void> = Promise.resolve();
+  let openQueue: Promise<void> = Promise.resolve();
   const ready = ref(false);
   const resizing = ref(false);
   const { toastMessage, showToast } = useToast();
@@ -203,6 +216,7 @@ export function useWorkspace() {
       windowSize.value.height,
       paneRatios.value,
       sidebarWidth.value,
+      panes.value.map(pane => findLabel.value === tabLabelOf(pane) ? 40 : 0),
     ),
   );
 
@@ -216,6 +230,10 @@ export function useWorkspace() {
         index,
         tabLabel,
         tabs: tabsByService.value[pane.serviceId] ?? [],
+        activeTab: tabsByService.value[pane.serviceId]?.find(tab => tab.label === tabLabel),
+        findOpen: findLabel.value === tabLabel,
+        error: pageErrors.value[tabLabel] ?? "",
+        zoom: zoomByService.value[pane.serviceId] ?? 1,
         canGoBack: history.canGoBack,
         canGoForward: history.canGoForward,
         loading: Boolean(loadingByLabel.value[tabLabel]),
@@ -266,7 +284,7 @@ export function useWorkspace() {
           patch.title && patch.title.trim() ? patch.title.trim() : tab.title;
         return {
           ...tab,
-          title,
+          title: tab.closable ? title : tab.title,
           url: patch.url || tab.url,
         };
       }),
@@ -274,6 +292,14 @@ export function useWorkspace() {
   }
 
   function applyPageState(payload: ContentPagePayload): void {
+    if (!webviews.has(payload.label) && !creating.has(payload.label)) return;
+    if (payload.focused && overlay.value === "none") {
+      const index = panes.value.findIndex(pane => tabLabelOf(pane) === payload.label);
+      if (index >= 0 && index !== focusedPaneIndex.value) {
+        focusedPaneIndex.value = index;
+        void saveLastActiveId(panes.value[index].serviceId);
+      }
+    }
     historyByLabel.value = {
       ...historyByLabel.value,
       [payload.label]: {
@@ -286,6 +312,16 @@ export function useWorkspace() {
       url: payload.url,
     });
     if (typeof payload.loading === "boolean") {
+      window.clearTimeout(loadTimers.get(payload.label));
+      loadTimers.delete(payload.label);
+      pageErrors.value = { ...pageErrors.value, [payload.label]: "" };
+      if (payload.loading) {
+        loadTimers.set(payload.label, window.setTimeout(() => {
+          if (loadingByLabel.value[payload.label]) {
+            pageErrors.value = { ...pageErrors.value, [payload.label]: "加载时间较长，可重试或在浏览器打开" };
+          }
+        }, 30_000));
+      }
       loadingByLabel.value = {
         ...loadingByLabel.value,
         [payload.label]: payload.loading,
@@ -462,6 +498,12 @@ export function useWorkspace() {
       next.add(label);
     } else {
       next.delete(label);
+      window.clearTimeout(loadTimers.get(label));
+      loadTimers.delete(label);
+      historyQuerySeq.set(label, (historyQuerySeq.get(label) ?? 0) + 1);
+      delete historyByLabel.value[label];
+      delete loadingByLabel.value[label];
+      delete pageErrors.value[label];
     }
     openedLabels.value = next;
   }
@@ -481,6 +523,12 @@ export function useWorkspace() {
         toClose.push(label);
       }
       next.delete(label);
+      window.clearTimeout(loadTimers.get(label));
+      loadTimers.delete(label);
+      historyQuerySeq.set(label, (historyQuerySeq.get(label) ?? 0) + 1);
+      delete historyByLabel.value[label];
+      delete loadingByLabel.value[label];
+      delete pageErrors.value[label];
     }
     openedLabels.value = next;
     await Promise.all(
@@ -537,6 +585,7 @@ export function useWorkspace() {
       windowSize.value.height,
       paneRatios.value,
       sidebarWidth.value,
+      panes.value.map(pane => findLabel.value === tabLabelOf(pane) ? 40 : 0),
     );
     const visible = new Map<string, (typeof rects)[number]>();
     panes.value.forEach((pane, index) => {
@@ -563,6 +612,7 @@ export function useWorkspace() {
     if (overlay.value === next) {
       return;
     }
+    if (next !== "none") await closeFind(false);
     overlay.value = next;
     await layoutAll();
     if (next === "none") {
@@ -689,6 +739,7 @@ export function useWorkspace() {
       await webviews.get(tab.label)?.setFocus();
       await refreshVisibleHistory();
     } catch (error) {
+      pageErrors.value = { ...pageErrors.value, [tab.label]: "页面打开失败，请重试或在浏览器打开" };
       showToast(
         error instanceof Error ? error.message : `打开 ${tab.title} 失败`,
       );
@@ -696,6 +747,7 @@ export function useWorkspace() {
   }
 
   async function selectTab(label: string): Promise<void> {
+    if (findLabel.value && findLabel.value !== label) await closeFind(false);
     const serviceId = serviceIdFromWebviewLabel(label);
     const existing = panes.value.findIndex((pane) => pane.serviceId === serviceId);
     const paneIndex = existing >= 0 ? existing : focusedPaneIndex.value;
@@ -880,66 +932,154 @@ export function useWorkspace() {
     await layoutAll(false);
   }
 
-  async function openTab(service: AiService, url: string): Promise<void> {
+  async function openTab(service: AiService, url: string, openerLabel = webviewLabel(service.id)): Promise<void> {
     const tabs = ensureHomeTab(service);
-    const existing = tabs.find((tab) => samePageUrl(tab.url, url));
+    const existing = tabs.find(tab => samePageUrl(tab.url, url));
     if (existing) {
       await selectTab(existing.label);
       return;
     }
-
     if (tabs.length >= MAX_TABS_PER_SERVICE) {
-      const target = tabs.find((tab) => tab.closable) ?? tabs[tabs.length - 1];
-      await selectTab(target.label);
-      if (webviews.has(target.label)) {
-        await invoke("load_content_webview", { label: target.label, url });
-        updateTabMeta(target.label, {
-          title: titleFromUrl(url, service.name),
-          url,
-        });
-      }
+      showToast(`最多打开 ${MAX_TABS_PER_SERVICE} 个标签，请关闭部分标签后重试`);
+      const picked = await showPopup([
+        { id: "popup:limit-browser", text: "在系统浏览器打开新链接" },
+        { id: "popup:limit-copy", text: "复制新链接" },
+      ], { x: sidebarWidth.value + 100, y: TAB_BAR_HEIGHT });
+      if (picked === "popup:limit-browser") await openInBrowser(url);
+      if (picked === "popup:limit-copy") await copyUrl(url);
       return;
     }
-
-    const label = extraTabLabel(service.id);
     const tab: ContentTab = {
-      label,
+      label: extraTabLabel(service.id),
       title: titleFromUrl(url, service.name),
       url,
       closable: true,
+      openerLabel,
     };
     setServiceTabs(service.id, [...tabs, tab]);
-    await selectTab(label);
+    await selectTab(tab.label);
   }
 
   async function handleOpenTab(payload: OpenTabPayload): Promise<void> {
     const serviceId = serviceIdFromWebviewLabel(payload.openerLabel);
-    const service = services.value.find((item) => item.id === serviceId);
-    if (!service) {
+    const service = services.value.find(item => item.id === serviceId);
+    if (!service || !webviews.has(payload.openerLabel)) return;
+    if (payload.navigate) {
+      await invoke("load_content_webview", { label: payload.openerLabel, url: payload.url });
+      updateTabMeta(payload.openerLabel, { url: payload.url });
+      scheduleHistoryRefresh();
       return;
     }
-    await openTab(service, payload.url);
+    await openTab(service, payload.url, payload.openerLabel);
   }
 
-  async function closeTab(label: string): Promise<void> {
+  async function closeTab(label: string, remember = true): Promise<void> {
     const serviceId = serviceIdFromWebviewLabel(label);
     const tabs = tabsByService.value[serviceId] ?? [];
-    const tab = tabs.find((item) => item.label === label);
-    if (!tab || !tab.closable) {
-      return;
+    const index = tabs.findIndex(item => item.label === label);
+    const tab = tabs[index];
+    if (!tab?.closable) return;
+    if (findLabel.value === label) await closeFind(false);
+    if (remember) {
+      closedTabs.push({ serviceId, tab: { ...tab }, index });
+      if (closedTabs.length > 20) closedTabs.shift();
     }
-
-    const nextTabs = tabs.filter((item) => item.label !== label);
+    const nextTabs = tabs.filter(item => item.label !== label);
     setServiceTabs(serviceId, nextTabs);
-
+    const wasActive = lastTabByService.value[serviceId] === label;
+    const fallback = nextTabs.find(item => item.label === tab.openerLabel)
+      ?? nextTabs[Math.max(0, index - 1)] ?? nextTabs[0];
+    // Update before closing, so concurrent layout/history callbacks never select a dead page.
+    if (wasActive && fallback) lastTabByService.value = { ...lastTabByService.value, [serviceId]: fallback.label };
     await closeWebview(label);
-
-    if (lastTabByService.value[serviceId] === label) {
-      const fallback = nextTabs[nextTabs.length - 1] ?? nextTabs[0];
-      if (fallback) {
-        await selectTab(fallback.label);
-      }
+    if (wasActive && fallback) {
+      if (panes.value.some(pane => pane.serviceId === serviceId)) await selectTab(fallback.label);
     }
+  }
+
+  async function restoreClosedTab(): Promise<void> {
+    const saved = closedTabs[closedTabs.length - 1];
+    if (!saved) { showToast("没有可恢复的标签"); return; }
+    const service = services.value.find(item => item.id === saved.serviceId);
+    if (!service) { closedTabs.pop(); return restoreClosedTab(); }
+    const tabs = ensureHomeTab(service);
+    if (tabs.length >= MAX_TABS_PER_SERVICE) { showToast("标签已满，请先关闭部分标签"); return; }
+    closedTabs.pop();
+    const tab = { ...saved.tab, label: extraTabLabel(service.id) };
+    const next = [...tabs];
+    next.splice(Math.min(saved.index, next.length), 0, tab);
+    setServiceTabs(service.id, next);
+    await selectTab(tab.label);
+  }
+
+  async function returnToSource(label: string): Promise<void> {
+    const tabs = tabsByService.value[serviceIdFromWebviewLabel(label)] ?? [];
+    const tab = tabs.find(item => item.label === label);
+    const source = tabs.find(item => item.label === tab?.openerLabel) ?? tabs[0];
+    if (source) await selectTab(source.label);
+  }
+
+  async function cycleTab(direction: number): Promise<void> {
+    const tab = focusedTab();
+    if (!tab) return;
+    const tabs = tabsByService.value[activeId.value] ?? [];
+    const index = tabs.findIndex(item => item.label === tab.label);
+    const next = tabs[(index + direction + tabs.length) % tabs.length];
+    if (next) await selectTab(next.label);
+  }
+
+  async function openFind(): Promise<void> {
+    const tab = focusedTab();
+    if (!tab || overlay.value !== "none") return;
+    if (findLabel.value !== tab.label) {
+      await closeFind(false);
+      findLabel.value = tab.label;
+    }
+    findFocusToken.value += 1;
+    await layoutAll(false);
+    await getCurrentWebview().setFocus();
+  }
+
+  async function closeFind(focus = true): Promise<void> {
+    const label = findLabel.value;
+    findLabel.value = "";
+    findSeq += 1;
+    window.clearTimeout(findTimer);
+    findQuery.value = "";
+    findResult.value = { total: 0, index: 0 };
+    findError.value = "";
+    if (label && webviews.has(label)) {
+      await invoke("find_content_text", { label, query: "", direction: 0 }).catch(() => {});
+    }
+    if (label) await layoutAll(false);
+    if (focus && overlay.value === "none") await focusPane(focusedPaneIndex.value);
+  }
+
+  async function findText(direction = 0): Promise<void> {
+    const label = findLabel.value;
+    if (!label) { await openFind(); return; }
+    window.clearTimeout(findTimer);
+    const seq = ++findSeq;
+    findError.value = "";
+    try {
+      const result = await invoke<{ total: number; index: number }>("find_content_text", { label, query: findQuery.value, direction });
+      if (seq === findSeq) findResult.value = result;
+    } catch {
+      if (seq === findSeq) findError.value = "查找失败，请重试";
+    }
+  }
+
+  function updateFindQuery(query: string): void {
+    findQuery.value = query;
+    findSeq += 1;
+    findTimer = window.setTimeout(() => { void findText(); }, 150);
+  }
+
+  async function focusAddress(): Promise<void> {
+    const tab = focusedTab();
+    if (!tab || overlay.value !== "none") return;
+    addressFocus.value = { label: tab.label, token: addressFocus.value.token + 1 };
+    await getCurrentWebview().setFocus();
   }
 
   async function closeServicePages(id: string): Promise<void> {
@@ -1265,18 +1405,33 @@ export function useWorkspace() {
   }
 
   async function openInBrowser(url: string): Promise<void> {
-    if (!url) {
+    if (!/^https?:\/\//i.test(url)) {
+      showToast("只能在浏览器打开 http(s) 页面");
       return;
     }
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
   }
 
+  async function copyPageUrl(label: string): Promise<void> {
+    await refreshLabelHistory(label);
+    const tab = tabsByService.value[serviceIdFromWebviewLabel(label)]?.find(item => item.label === label);
+    if (tab) await copyUrl(tab.url);
+  }
+
+  async function openPageInBrowser(label: string): Promise<void> {
+    await refreshLabelHistory(label);
+    const tab = tabsByService.value[serviceIdFromWebviewLabel(label)]?.find(item => item.label === label);
+    if (tab) await openInBrowser(tab.url);
+  }
+
   async function copyActiveUrl(): Promise<void> {
+    await refreshVisibleHistory();
     await copyUrl(focusedTab()?.url ?? "");
   }
 
   async function openActiveInBrowser(): Promise<void> {
+    await refreshVisibleHistory();
     await openInBrowser(focusedTab()?.url ?? "");
   }
 
@@ -1327,10 +1482,19 @@ export function useWorkspace() {
     await persistLayouts();
   }
 
-  async function handleMenuAction(id: string): Promise<void> {
+  function handleMenuAction(id: string): Promise<void> {
+    menuQueue = menuQueue.then(() => dispatchMenuAction(id)).catch(error => {
+      showToast(error instanceof Error ? error.message : "操作失败");
+    });
+    return menuQueue;
+  }
+
+  async function dispatchMenuAction(id: string): Promise<void> {
     if (id.startsWith("popup:")) {
       return;
     }
+    if (overlay.value !== "none" && !["settings", "manage", "toggle-sidebar", "close-tab"].includes(id) && !id.startsWith("service-")) return;
+    await refreshVisibleHistory();
     const label = paneViews.value[focusedPaneIndex.value]?.tabLabel ?? "";
     switch (id) {
       case "settings":
@@ -1357,7 +1521,16 @@ export function useWorkspace() {
       case "stop":
         await stopTab(label);
         return;
+      case "find": await openFind(); return;
+      case "find-next": await findText(1); return;
+      case "find-previous": await findText(-1); return;
+      case "address": await focusAddress(); return;
+      case "restore-tab": await restoreClosedTab(); return;
+      case "next-tab": await cycleTab(1); return;
+      case "previous-tab": await cycleTab(-1); return;
+      case "return-source": await returnToSource(label); return;
       case "close-tab":
+        if (overlay.value !== "none") { await setOverlay("none"); return; }
         await closeActiveTab();
         return;
       case "zoom-in":
@@ -1617,7 +1790,9 @@ export function useWorkspace() {
       );
       unlisteners.push(
         await listen<OpenTabPayload>("content-open-tab", (event) => {
-          void handleOpenTab(event.payload);
+          openQueue = openQueue.then(() => handleOpenTab(event.payload)).catch(error => {
+            showToast(error instanceof Error ? error.message : "打开链接失败");
+          });
         }),
       );
       historyPollTimer = window.setInterval(() => {
@@ -1637,6 +1812,8 @@ export function useWorkspace() {
   });
 
   onUnmounted(() => {
+    window.clearTimeout(findTimer);
+    for (const timer of loadTimers.values()) window.clearTimeout(timer);
     window.clearInterval(historyPollTimer);
     window.clearTimeout(historyDelayTimer);
     if (layoutRaf) {
@@ -1676,6 +1853,19 @@ export function useWorkspace() {
     canSaveLayout,
     currentLayoutSaved,
     focusedZoom,
+    findLabel,
+    findQuery,
+    findResult,
+    findError,
+    findFocusToken,
+    addressFocus,
+    openFind,
+    closeFind,
+    findText,
+    updateFindQuery,
+    focusAddress,
+    returnToSource,
+    restoreClosedTab,
     setOverlay,
     setManaging,
     toggleSidebar,
@@ -1696,6 +1886,8 @@ export function useWorkspace() {
     zoomOut,
     zoomReset,
     copyUrl,
+    copyPageUrl,
+    openPageInBrowser,
     openInBrowser,
     copyActiveUrl,
     openActiveInBrowser,
