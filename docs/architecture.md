@@ -81,7 +81,7 @@ App.vue（侧栏 + 管理/设置 / 各分屏栏标签栏 + 分隔条）
 
 启动时：内置目录始终来自 `src/types.ts` 的 `CATALOG_SERVICES`；侧栏只显示 `enabledServiceIds` 中的内置项，再合并 store 里 `builtin: false` 的自定义项。这样内置 URL / 图标更新不会被旧缓存挡住。
 
-侧栏展开 `SIDEBAR_WIDTH_EXPANDED = 192`，图标栏 `SIDEBAR_WIDTH_RAIL = 80`，标签栏高度 `TAB_BAR_HEIGHT = 56`，分屏分隔条 `SPLITTER_WIDTH = 8`，最多 `MAX_PANES = 3`，固定分屏最多 `MAX_SAVED_LAYOUTS = 12`。布局计算与 `main` WebView 实际尺寸都使用它们，不是仅靠 CSS 裁切。各栏宽度按比例分配内容区（扣除分隔条），最小约 200px。打开管理或设置页时内容 WebView 全部 `hide()`，页面由 `main` 铺满侧栏右侧。固定分屏 id 形如 `layout-abcdefgh`，只出现在侧栏，不创建 WebView。颜色只走 CSS 变量 `--c-*`。右键 / 分屏选择器 / 标签更多菜单必须用 Rust `popup_menu`，DOM 弹层会被子 WebView 盖住。
+侧栏展开 `SIDEBAR_WIDTH_EXPANDED = 192`，图标栏 `SIDEBAR_WIDTH_RAIL = 80`，工具栏高度 `TAB_BAR_HEIGHT = 40`，分屏分隔条 `SPLITTER_WIDTH = 8`，最多 `MAX_PANES = 3`，固定分屏最多 `MAX_SAVED_LAYOUTS = 12`。各栏顶部采用 40px 单行紧凑工具栏（整合导航按钮、地址栏/多标签切换、分屏与更多按钮；单标签时隐藏冗余服务标题以节省空间）。布局计算与 `main` WebView 实际尺寸都使用它们，不是仅靠 CSS 裁切。各栏宽度按比例分配内容区（扣除分隔条），最小约 200px。打开管理或设置页时内容 WebView 全部 `hide()`，页面由 `main` 铺满侧栏右侧。固定分屏 id 形如 `layout-abcdefgh`，只出现在侧栏，不创建 WebView。颜色只走 CSS 变量 `--c-*`。右键 / 分屏选择器 / 标签更多菜单必须用 Rust `popup_menu`，DOM 弹层会被子 WebView 盖住。
 
 ## 5. 权限
 
@@ -113,6 +113,7 @@ App.vue（侧栏 + 管理/设置 / 各分屏栏标签栏 + 分隔条）
 | [`src/assets/logo-wordmark.svg`](../src/assets/logo-wordmark.svg) | AiPanel 横版品牌标识（微标 + 字标） |
 | [`src/lib/layout.ts`](../src/lib/layout.ts) | 侧栏、标签栏、分屏栏 bounds 与分隔条比例 |
 | [`src/lib/persist.ts`](../src/lib/persist.ts) | store 读写与内置/自定义/分屏/主题/排序/缩放合并 |
+| [`src-tauri/src/browser.rs`](../src-tauri/src/browser.rs) | 网页脚本注入、登录 URL 识别、⌘+左键使用默认浏览器打开拦截 |
 | [`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs) | 子 WebView 生命周期、UA、新窗口改为开标签、前进/后退/刷新/停止、缩放、应用菜单、`popup_menu` |
 | [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) | 窗口尺寸、Overlay 标题栏、macOS ad-hoc 签名 |
 | [`src-tauri/Cargo.toml`](../src-tauri/Cargo.toml) | `unstable`、store / opener / dialog / clipboard / window-state |

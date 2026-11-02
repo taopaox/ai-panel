@@ -34,6 +34,7 @@ const shortcuts = [
   { keys: "⌘= / ⌘- / ⌘0", action: "放大 / 缩小 / 实际大小" },
   { keys: "⌘⇧C", action: "复制链接" },
   { keys: "⌘⇧O", action: "在浏览器中打开" },
+  { keys: "⌘+左键", action: "使用默认浏览器打开链接" },
 ];
 
 const themes: { id: ThemeMode; label: string }[] = [

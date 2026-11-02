@@ -1,6 +1,6 @@
 export const SIDEBAR_WIDTH_EXPANDED = 192;
 export const SIDEBAR_WIDTH_RAIL = 80;
-export const TAB_BAR_HEIGHT = 96;
+export const TAB_BAR_HEIGHT = 40;
 export const SPLITTER_WIDTH = 8;
 export const MAX_TABS_PER_SERVICE = 8;
 export const MAX_PANES = 3;

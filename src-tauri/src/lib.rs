@@ -319,13 +319,21 @@ async fn create_content_webview(
     let app_for_title = app.clone();
     let label_for_title = label.clone();
 
+    let is_extra = label.contains("-t-");
+    let init_script = format!(
+        "window.__AIPANEL_EXTRA_TAB__ = {};\n{}",
+        if is_extra { "true" } else { "false" },
+        browser::LINK_SCRIPT
+    );
     let mut builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed));
-    if !label.contains("-t-") {
-        builder = builder.initialization_script(browser::LINK_SCRIPT);
-    }
+    builder = builder.initialization_script(&init_script);
     let builder = builder
         .user_agent(SAFARI_UA)
         .on_new_window(move |popup_url, _features| {
+            if let Some(target_url) = browser::extract_open_browser_url(&popup_url) {
+                let _ = tauri_plugin_opener::open_url(target_url.as_str(), None::<&str>);
+                return NewWindowResponse::Deny;
+            }
             if popup_url.scheme() == "http" || popup_url.scheme() == "https" {
                 let _ = app_for_popup.emit_to(
                     EventTarget::webview("main"),
