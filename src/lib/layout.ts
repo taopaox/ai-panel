@@ -156,8 +156,8 @@ export async function getContentBounds(
   return paneBoundsList(width, height, [1], sidebarWidth)[0];
 }
 
-export async function layoutShell(): Promise<void> {
-  const { width, height } = await getLogicalWindowSize();
+export async function layoutShell(size?: { width: number; height: number }): Promise<void> {
+  const { width, height } = size ?? await getLogicalWindowSize();
   const shell = getCurrentWebview();
   await shell.setPosition(new LogicalPosition(0, 0));
   await shell.setSize(new LogicalSize(width, height));
@@ -166,7 +166,12 @@ export async function layoutShell(): Promise<void> {
 export async function layoutContentWebview(
   webview: Webview,
   bounds: ContentBounds,
+  previous?: ContentBounds,
 ): Promise<void> {
-  await webview.setPosition(new LogicalPosition(bounds.x, bounds.y));
-  await webview.setSize(new LogicalSize(bounds.width, bounds.height));
+  if (!previous || previous.x !== bounds.x || previous.y !== bounds.y) {
+    await webview.setPosition(new LogicalPosition(bounds.x, bounds.y));
+  }
+  if (!previous || previous.width !== bounds.width || previous.height !== bounds.height) {
+    await webview.setSize(new LogicalSize(bounds.width, bounds.height));
+  }
 }

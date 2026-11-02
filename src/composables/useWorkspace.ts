@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview, Webview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   applySplitterDrag,
   contentAreaSize,
@@ -16,6 +16,7 @@ import {
   paneWidths,
   splitRatioAt,
   widthsToRatios,
+  type ContentBounds,
 } from "../lib/layout";
 import { showPopup, type PopupPoint } from "../lib/menu";
 import {
@@ -72,7 +73,7 @@ import {
 } from "../types";
 import { useToast } from "./useToast";
 
-const HISTORY_POLL_MS = 800;
+const HISTORY_POLL_MS = 2000;
 const HISTORY_REFRESH_DELAY_MS = 160;
 
 async function waitForWebview(label: string): Promise<Webview> {
@@ -136,16 +137,28 @@ export function useWorkspace() {
   let openQueue: Promise<void> = Promise.resolve();
   const ready = ref(false);
   const resizing = ref(false);
+  const windowFocused = ref(false);
+  const documentVisible = ref(!document.hidden);
   const { toastMessage, showToast } = useToast();
 
   const webviews = new Map<string, Webview>();
+  const visibleWebviews = new Set<string>();
+  const boundsByLabel = new Map<string, ContentBounds>();
   const openedLabels = ref(new Set<string>());
   const creating = new Set<string>();
   const unlisteners: Array<() => void> = [];
   const historyQuerySeq = new Map<string, number>();
+  const historyQueries = new Map<string, Promise<void>>();
   let historyPollTimer = 0;
   let historyDelayTimer = 0;
   let layoutRaf = 0;
+  let scheduledMeasure = false;
+  let layoutRequested = false;
+  let layoutMeasure = false;
+  let layoutPromise: Promise<void> | null = null;
+  let shellSize: { width: number; height: number } | undefined;
+  let hidingForOverlay = false;
+  let disposed = false;
   let resizeSession: {
     index: number;
     startX: number;
@@ -274,21 +287,18 @@ export function useWorkspace() {
     if (!tabs) {
       return;
     }
-    setServiceTabs(
-      serviceId,
-      tabs.map((tab) => {
-        if (tab.label !== label) {
-          return tab;
-        }
-        const title =
-          patch.title && patch.title.trim() ? patch.title.trim() : tab.title;
-        return {
-          ...tab,
-          title: tab.closable ? title : tab.title,
-          url: patch.url || tab.url,
-        };
-      }),
-    );
+    const tab = tabs.find(item => item.label === label);
+    if (!tab) return;
+    const title = tab.closable && patch.title?.trim() ? patch.title.trim() : tab.title;
+    const url = patch.url || tab.url;
+    if (title === tab.title && url === tab.url) return;
+    setServiceTabs(serviceId, tabs.map(item => item === tab ? { ...tab, title, url } : item));
+  }
+
+  function setHistoryState(label: string, state: HistoryState): void {
+    const previous = historyByLabel.value[label];
+    if (previous?.canGoBack === state.canGoBack && previous?.canGoForward === state.canGoForward) return;
+    historyByLabel.value = { ...historyByLabel.value, [label]: state };
   }
 
   function applyPageState(payload: ContentPagePayload): void {
@@ -300,13 +310,10 @@ export function useWorkspace() {
         void saveLastActiveId(panes.value[index].serviceId);
       }
     }
-    historyByLabel.value = {
-      ...historyByLabel.value,
-      [payload.label]: {
-        canGoBack: payload.canGoBack,
-        canGoForward: payload.canGoForward,
-      },
-    };
+    setHistoryState(payload.label, {
+      canGoBack: payload.canGoBack,
+      canGoForward: payload.canGoForward,
+    });
     updateTabMeta(payload.label, {
       title: payload.title,
       url: payload.url,
@@ -329,12 +336,8 @@ export function useWorkspace() {
     }
   }
 
-  async function refreshLabelHistory(label: string): Promise<void> {
+  async function queryLabelHistory(label: string): Promise<void> {
     if (!webviews.has(label)) {
-      historyByLabel.value = {
-        ...historyByLabel.value,
-        [label]: emptyHistory(),
-      };
       return;
     }
 
@@ -353,16 +356,30 @@ export function useWorkspace() {
       if (historyQuerySeq.get(label) !== seq) {
         return;
       }
-      historyByLabel.value = {
-        ...historyByLabel.value,
-        [label]: emptyHistory(),
-      };
+      setHistoryState(label, emptyHistory());
     }
   }
 
+  function refreshLabelHistory(label: string): Promise<void> {
+    const pending = historyQueries.get(label);
+    if (pending) return pending;
+    const query = queryLabelHistory(label).finally(() => historyQueries.delete(label));
+    historyQueries.set(label, query);
+    return query;
+  }
+
   async function refreshVisibleHistory(): Promise<void> {
+    if (disposed || hidingForOverlay || overlay.value !== "none" || !windowFocused.value || !documentVisible.value) return;
     await Promise.all(visibleTabLabels().map((label) => refreshLabelHistory(label)));
   }
+
+  watch([ready, overlay, windowFocused, documentVisible], () => {
+    window.clearInterval(historyPollTimer);
+    historyPollTimer = 0;
+    if (!ready.value || overlay.value !== "none" || !windowFocused.value || !documentVisible.value) return;
+    void refreshVisibleHistory();
+    historyPollTimer = window.setInterval(() => { void refreshVisibleHistory(); }, HISTORY_POLL_MS);
+  });
 
   function scheduleHistoryRefresh(): void {
     window.clearTimeout(historyDelayTimer);
@@ -509,6 +526,7 @@ export function useWorkspace() {
   }
 
   function rememberWebview(label: string, webview: Webview): void {
+    if (!webviews.has(label)) visibleWebviews.add(label);
     webviews.set(label, webview);
     syncOpenedLabel(label, true);
   }
@@ -523,6 +541,8 @@ export function useWorkspace() {
         toClose.push(label);
       }
       next.delete(label);
+      visibleWebviews.delete(label);
+      boundsByLabel.delete(label);
       window.clearTimeout(loadTimers.get(label));
       loadTimers.delete(label);
       historyQuerySeq.set(label, (historyQuerySeq.get(label) ?? 0) + 1);
@@ -565,19 +585,14 @@ export function useWorkspace() {
     }
   }
 
-  async function layoutAll(measure = true): Promise<void> {
+  async function applyWebviewLayout(measure: boolean): Promise<void> {
     if (measure) {
-      windowSize.value = await getLogicalWindowSize();
-      await layoutShell();
-    }
-
-    if (overlay.value !== "none") {
-      await Promise.all(
-        [...webviews.values()].map(async (webview) => {
-          await webview.hide();
-        }),
-      );
-      return;
+      const size = await getLogicalWindowSize();
+      if (size.width !== windowSize.value.width || size.height !== windowSize.value.height) windowSize.value = size;
+      if (!shellSize || shellSize.width !== size.width || shellSize.height !== size.height) {
+        await layoutShell(size);
+        shellSize = size;
+      }
     }
 
     const rects = paneBoundsList(
@@ -588,33 +603,92 @@ export function useWorkspace() {
       panes.value.map(pane => findLabel.value === tabLabelOf(pane) ? 40 : 0),
     );
     const visible = new Map<string, (typeof rects)[number]>();
-    panes.value.forEach((pane, index) => {
+    if (!hidingForOverlay && overlay.value === "none") panes.value.forEach((pane, index) => {
       const bounds = rects[index];
       if (bounds) {
         visible.set(tabLabelOf(pane), bounds);
       }
     });
 
-    await Promise.all(
-      [...webviews.entries()].map(async ([label, webview]) => {
-        const bounds = visible.get(label);
-        if (bounds) {
-          await layoutContentWebview(webview, bounds);
-          await webview.show();
-        } else {
+    // Hide outgoing pages first; already hidden pages need no native calls.
+    const hideResults = await Promise.allSettled(
+      [...visibleWebviews].filter(label => !visible.has(label)).map(async label => {
+        const webview = webviews.get(label);
+        if (!webview) return;
+        try {
           await webview.hide();
+          if (webviews.get(label) === webview) visibleWebviews.delete(label);
+        } catch (error) {
+          if (webviews.get(label) === webview) throw error;
         }
       }),
     );
+    const hideFailure = hideResults.find(result => result.status === "rejected");
+    if (hideFailure?.status === "rejected") throw hideFailure.reason;
+    const results = await Promise.allSettled(
+      [...visible].map(async ([label, bounds]) => {
+        const webview = webviews.get(label);
+        if (!webview) return;
+        try {
+          await layoutContentWebview(webview, bounds, boundsByLabel.get(label));
+          if (webviews.get(label) !== webview) return;
+          boundsByLabel.set(label, bounds);
+          if (!visibleWebviews.has(label) && !hidingForOverlay && overlay.value === "none") {
+            await webview.show();
+            if (webviews.get(label) === webview) visibleWebviews.add(label);
+          }
+        } catch (error) {
+          if (webviews.get(label) === webview) {
+            boundsByLabel.delete(label);
+            throw error;
+          }
+        }
+      }),
+    );
+    const failure = results.find(result => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
+  }
+
+  function layoutAll(measure = true): Promise<void> {
+    if (disposed) return Promise.resolve();
+    layoutRequested = true;
+    layoutMeasure ||= measure;
+    if (!layoutPromise) {
+      // Every caller awaits the same drain; intermediate drag positions coalesce.
+      layoutPromise = Promise.resolve().then(async () => {
+        while (layoutRequested && !disposed) {
+          const shouldMeasure = layoutMeasure;
+          layoutRequested = false;
+          layoutMeasure = false;
+          await applyWebviewLayout(shouldMeasure);
+        }
+      }).finally(() => {
+        layoutPromise = null;
+        // A caller can enqueue work between the async drain resolving and this
+        // cleanup microtask. Keep that caller's promise tied to the final pass.
+        if (layoutRequested && !disposed) return layoutAll(false);
+      });
+    }
+    return layoutPromise;
   }
 
   async function setOverlay(next: OverlayKind): Promise<void> {
     if (overlay.value === next) {
       return;
     }
-    if (next !== "none") await closeFind(false);
-    overlay.value = next;
-    await layoutAll();
+    if (next !== "none") {
+      hidingForOverlay = true;
+      try {
+        await closeFind(false);
+        await layoutAll();
+        overlay.value = next;
+      } finally {
+        hidingForOverlay = false;
+      }
+    } else {
+      overlay.value = next;
+      await layoutAll();
+    }
     if (next === "none") {
       await focusPane(focusedPaneIndex.value);
     }
@@ -631,12 +705,17 @@ export function useWorkspace() {
   }
 
   function scheduleLayout(measure = true): void {
+    scheduledMeasure ||= measure;
     if (layoutRaf) {
       return;
     }
     layoutRaf = window.requestAnimationFrame(() => {
       layoutRaf = 0;
-      void layoutAll(measure);
+      const shouldMeasure = scheduledMeasure;
+      scheduledMeasure = false;
+      void layoutAll(shouldMeasure).catch(error => {
+        showToast(error instanceof Error ? error.message : "更新页面布局失败");
+      });
     });
   }
 
@@ -1070,6 +1149,7 @@ export function useWorkspace() {
   }
 
   function updateFindQuery(query: string): void {
+    window.clearTimeout(findTimer);
     findQuery.value = query;
     findSeq += 1;
     findTimer = window.setTimeout(() => { void findText(); }, 150);
@@ -1765,10 +1845,18 @@ export function useWorkspace() {
         panesLocked.value = state.panesLocked && panes.value.length > 1;
       }
 
-      await layoutShell();
       windowSize.value = await getLogicalWindowSize();
+      await layoutShell(windowSize.value);
+      shellSize = windowSize.value;
 
       const currentWindow = getCurrentWindow();
+      unlisteners.push(await currentWindow.onFocusChanged(event => {
+        windowFocused.value = event.payload;
+      }));
+      windowFocused.value = await currentWindow.isFocused();
+      const updateVisibility = () => { documentVisible.value = !document.hidden; };
+      document.addEventListener("visibilitychange", updateVisibility);
+      unlisteners.push(() => document.removeEventListener("visibilitychange", updateVisibility));
       unlisteners.push(
         await currentWindow.onResized(() => {
           scheduleLayout(true);
@@ -1795,10 +1883,6 @@ export function useWorkspace() {
           });
         }),
       );
-      historyPollTimer = window.setInterval(() => {
-        void refreshVisibleHistory();
-      }, HISTORY_POLL_MS);
-
       await ensurePaneWebviews();
       await layoutAll(false);
       await focusPane(focusedPaneIndex.value);
@@ -1812,6 +1896,7 @@ export function useWorkspace() {
   });
 
   onUnmounted(() => {
+    disposed = true;
     window.clearTimeout(findTimer);
     for (const timer of loadTimers.values()) window.clearTimeout(timer);
     window.clearInterval(historyPollTimer);
